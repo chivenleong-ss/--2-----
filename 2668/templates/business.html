@@ -1,0 +1,689 @@
+{% extends "base.html" %}
+{% block title %}区域-客户-履约健康监测台{% endblock %}
+{% block nav_business %}active{% endblock %}
+
+{% block content %}
+<div class="ops-shell">
+    <section class="ops-hero">
+        <div class="hero-copy">
+            <span class="hero-kicker">OPERATING HEALTH COMMAND</span>
+            <h1>区域-客户-履约健康监测台</h1>
+            <p>从“找问题”升级为“画态势”，以区域布局、客户稳定、合同质量、履约盈利、资金效率五维评分形成经营画像，并联动二级单位、城市和重点项目对标。</p>
+        </div>
+    </section>
+
+    <div class="business-rule-card">
+        <div class="business-rule-clean">
+            <span class="business-rule-badge">评分规则</span>
+            <span><b>综合得分</b>：区域布局 30% + 客户稳定 20% + 合同质量 20% + 履约盈利 15% + 资金效率 15%。</span>
+            <span><b>五维口径</b>：各模块均为 0-100 分，分数越高代表经营状态越稳健。</span>
+            <span><b>分区阈值</b>：综合得分 ≥ 80 为强势区，65 ≤ 综合得分 &lt; 80 为稳健区，综合得分 &lt; 65 为承压区。</span>
+            <span><b>坐标解释</b>：五维雷达呈现经营画像，二级单位、城市、重点项目 Tab 可联动查看明细。</span>
+        </div>
+    </div>
+
+    <section class="ops-kpi-grid" id="kpiGrid"></section>
+
+    <section class="ops-main-grid">
+        <article class="ops-panel radar-panel">
+            <div class="panel-head">
+                <div>
+                    <span class="panel-eyebrow">FIVE-DIMENSION PROFILE</span>
+                    <h2>五维经营画像</h2>
+                </div>
+                <span class="panel-note">Canvas 手绘雷达</span>
+            </div>
+            <div class="radar-stage">
+                <canvas id="moduleRadarCanvas"></canvas>
+            </div>
+        </article>
+
+        <article class="ops-panel overview-panel">
+            <div class="panel-head">
+                <div>
+                    <span class="panel-eyebrow">POSTURE OVERVIEW</span>
+                    <h2>态势总览</h2>
+                </div>
+            </div>
+            <div class="mini-kpi-grid" id="miniKpiGrid"></div>
+            <div class="score-zone-row" id="scoreZoneRow"></div>
+        </article>
+    </section>
+
+    <section class="ops-panel benchmark-panel">
+        <div class="panel-head benchmark-head">
+            <div>
+                <span class="panel-eyebrow">BENCHMARK TABLE</span>
+                <h2>三级经营对标</h2>
+            </div>
+            <div class="tab-switch" id="tabSwitch">
+                <button type="button" class="active" data-tab="subsidiaries">二级单位对标</button>
+                <button type="button" data-tab="cities">城市对标</button>
+                <button type="button" data-tab="projects">重点项目</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="ops-table" id="benchmarkTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<style>
+.ops-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    color: #1d2d3e;
+}
+.ops-hero {
+    display: block;
+    padding: 22px;
+    border-radius: 12px;
+    background:
+        radial-gradient(circle at 92% 12%, rgba(47, 128, 215, 0.13), transparent 34%),
+        linear-gradient(135deg, #ffffff 0%, #f7fbff 58%, #edf6ff 100%);
+    border: 1px solid #dce8f6;
+    box-shadow: 0 18px 38px rgba(27, 72, 122, 0.07);
+}
+.hero-kicker, .panel-eyebrow {
+    display: inline-block;
+    color: #2f80d7;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+.hero-copy h1 {
+    margin: 10px 0 8px;
+    color: #143a61;
+    font-size: 30px;
+    line-height: 1.08;
+    font-weight: 800;
+}
+.hero-copy p {
+    max-width: 820px;
+    margin: 0;
+    color: #667b90;
+    font-size: 14px;
+    line-height: 1.75;
+}
+.business-rule-card {
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #e8f0ff 0%, #f4f7ff 100%);
+    border: 1px solid #c9d9ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+    overflow: hidden;
+}
+.business-rule-clean {
+    display: flex;
+    align-items: center;
+    gap: 10px 14px;
+    flex-wrap: wrap;
+    color: #49627e;
+    font-size: 12px;
+    line-height: 1.55;
+}
+.business-rule-clean span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+}
+.business-rule-clean b {
+    color: #274e7a;
+    font-weight: 800;
+}
+.business-rule-badge {
+    flex: 0 0 auto;
+    padding: 0 9px;
+    border-radius: 4px;
+    background: #2f80d7;
+    color: #fff !important;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .02em;
+}
+.ops-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+.ops-kpi-card {
+    position: relative;
+    min-height: 86px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #e4edf7;
+    box-shadow: 0 14px 30px rgba(15, 41, 76, 0.055);
+    overflow: hidden;
+}
+.kpi-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #2f80d7;
+    background: #edf6ff;
+    margin-bottom: 12px;
+}
+.kpi-label {
+    display: block;
+    color: #71879d;
+    font-size: 12px;
+    font-weight: 800;
+}
+.kpi-value {
+    display: block;
+    margin-top: 10px;
+    color: #1e88e5;
+    font-family: "SF Pro Display", "Inter", "Helvetica Neue", "DIN Regular", "Roboto", sans-serif;
+    font-size: 26px;
+    line-height: 1.12;
+    font-weight: 750;
+}
+.kpi-sub {
+    display: block;
+    margin-top: 8px;
+    color: #8da0b2;
+    font-size: 11px;
+    line-height: 1.45;
+}
+.ops-kpi-info { background: linear-gradient(135deg, #fff 0%, #eef7ff 100%); border-color: #cfe6ff; }
+.ops-kpi-info .kpi-icon { color: #1f7fca; background: #e7f3ff; }
+.ops-kpi-info .kpi-value { color: #1f7fca; }
+.ops-kpi-danger { background: linear-gradient(135deg, #fff 0%, #fff4f6 100%); border-color: #ffd7df; }
+.ops-kpi-danger .kpi-icon { color: #d94d63; background: #ffe9ed; }
+.ops-kpi-danger .kpi-value { color: #d94d63; }
+.ops-kpi-stable { background: linear-gradient(135deg, #fff 0%, #eefaf6 100%); border-color: #c8eee3; }
+.ops-kpi-stable .kpi-icon { color: #23876f; background: #e1f6ef; }
+.ops-kpi-stable .kpi-value { color: #23876f; }
+.ops-kpi-warning { background: linear-gradient(135deg, #fff 0%, #fff8e8 100%); border-color: #f3dfad; }
+.ops-kpi-warning .kpi-icon { color: #b77b12; background: #fef3cf; }
+.ops-kpi-warning .kpi-value { color: #b77b12; }
+.ops-main-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr);
+    gap: 16px;
+    align-items: stretch;
+}
+.ops-panel {
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid #dce8f6;
+    border-radius: 12px;
+    box-shadow: 0 14px 30px rgba(15, 41, 76, 0.045);
+    overflow: hidden;
+}
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #edf2f7;
+}
+.panel-head h2 {
+    margin: 6px 0 0;
+    color: #143a61;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 800;
+}
+.panel-note {
+    color: #8da0b2;
+    font-size: 12px;
+    font-weight: 700;
+}
+.radar-stage {
+    height: 430px;
+    padding: 14px;
+    background:
+        linear-gradient(#f5f9fd 1px, transparent 1px),
+        linear-gradient(90deg, #f5f9fd 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+#moduleRadarCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.mini-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 16px 18px 12px;
+}
+.mini-kpi-card {
+    min-height: 116px;
+    padding: 14px;
+    border-radius: 10px;
+    background: #f8fbff;
+    border: 1px solid #e6eef8;
+}
+.mini-kpi-card span {
+    display: block;
+    color: #667b90;
+    font-size: 12px;
+    font-weight: 800;
+}
+.mini-kpi-card strong {
+    display: block;
+    margin-top: 10px;
+    color: #1e88e5;
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 750;
+}
+.mini-kpi-card em {
+    display: block;
+    margin-top: 10px;
+    color: #8799ab;
+    font-size: 11px;
+    line-height: 1.5;
+    font-style: normal;
+}
+.mini-kpi-info, .mini-kpi-stable, .mini-kpi-warning, .mini-kpi-danger { background: #f8fbff; border-color: #e6eef8; }
+.mini-kpi-info strong, .mini-kpi-stable strong, .mini-kpi-warning strong, .mini-kpi-danger strong { color: #1d2d3e; }
+.score-zone-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    padding: 0 18px 18px;
+}
+.score-zone {
+    padding: 14px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e6eef8;
+}
+.score-zone span {
+    display: block;
+    color: #71879d;
+    font-size: 12px;
+    font-weight: 800;
+}
+.score-zone strong {
+    display: block;
+    margin-top: 9px;
+    color: #143a61;
+    font-size: 22px;
+}
+.score-zone em {
+    display: block;
+    margin-top: 7px;
+    color: #90a2b5;
+    font-size: 11px;
+    line-height: 1.45;
+    font-style: normal;
+}
+.score-zone-strong { background: #eefaf6; border-color: #c8eee3; }
+.score-zone-strong strong { color: #23876f; }
+.score-zone-steady { background: #eef7ff; border-color: #cfe6ff; }
+.score-zone-steady strong { color: #1f7fca; }
+.score-zone-pressure { background: #fff8e8; border-color: #f3dfad; }
+.score-zone-pressure strong { color: #b77b12; }
+.benchmark-head {
+    align-items: flex-start;
+}
+.tab-switch {
+    display: inline-flex;
+    gap: 6px;
+    padding: 4px;
+    border-radius: 10px;
+    background: #f1f6fc;
+    border: 1px solid #dce8f6;
+}
+.tab-switch button {
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #60758a;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+.tab-switch button.active {
+    color: #1e88e5;
+    background: #fff;
+    box-shadow: 0 6px 14px rgba(30, 136, 229, 0.11);
+}
+.table-wrap {
+    overflow-x: auto;
+}
+.ops-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.ops-table th {
+    padding: 12px 14px;
+    background: #f5f8fc;
+    color: #445468;
+    border-bottom: 1px solid #e8eef6;
+    font-weight: 800;
+    text-align: left;
+    white-space: nowrap;
+}
+.ops-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #eef2f7;
+    color: #374151;
+    vertical-align: top;
+}
+.ops-table .center {
+    text-align: center;
+}
+.score-pill {
+    display: inline-flex;
+    min-width: 56px;
+    justify-content: center;
+    padding: 5px 9px;
+    border-radius: 999px;
+    color: #1e88e5;
+    background: #edf6ff;
+    font-weight: 800;
+}
+.empty-cell {
+    padding: 34px 14px;
+    text-align: center;
+    color: #8da0b2;
+}
+@media (max-width: 1200px) {
+    .ops-hero, .ops-main-grid {
+        grid-template-columns: 1fr;
+    }
+    .ops-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 768px) {
+    .ops-kpi-grid, .mini-kpi-grid, .score-zone-row {
+        grid-template-columns: 1fr;
+    }
+    .benchmark-head {
+        flex-direction: column;
+    }
+    .tab-switch {
+        width: 100%;
+        overflow-x: auto;
+    }
+    .radar-stage {
+        height: 360px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const businessStats = {{ (business_stats if business_stats is mapping else {}) | tojson }};
+const summary = businessStats.summary || {};
+const overview = businessStats.overview || {};
+const subsidiaries = Array.isArray(businessStats.subsidiaries) ? businessStats.subsidiaries : [];
+const cities = Array.isArray(businessStats.cities) ? businessStats.cities : [];
+const focusProjects = Array.isArray(businessStats.focus_projects) ? businessStats.focus_projects : [];
+
+const moduleLabels = ["区域布局", "客户稳定", "合同质量", "履约盈利", "资金效率"];
+const moduleScoreValues = (() => {
+    const raw = overview.module_scores || {};
+    const values = Object.values(raw).map((value) => Number(value || 0));
+    return moduleLabels.map((_, index) => Number.isFinite(values[index]) ? values[index] : 0);
+})();
+
+function cleanText(value) {
+    const text = String(value ?? "").trim();
+    return text || "--";
+}
+
+function fmtNumber(value, digits = 0) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n.toFixed(digits) : Number(0).toFixed(digits);
+}
+
+function getByHint(row, hints, fallback = "--") {
+    if (!row) return fallback;
+    for (const hint of hints) {
+        if (row[hint] !== undefined && row[hint] !== null && row[hint] !== "") return row[hint];
+    }
+    const keys = Object.keys(row);
+    for (const hint of hints) {
+        const key = keys.find((item) => item.includes(hint));
+        if (key && row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+    }
+    return fallback;
+}
+
+function getName(row) {
+    return cleanText(getByHint(row, ["名称", "鍚嶇О", "单位", "城市", "project_name"], "--"));
+}
+
+function getProjectCount(row) {
+    return Number(getByHint(row, ["项目数", "椤圭洰鏁", "project_count"], 0)) || 0;
+}
+
+function getScore(row) {
+    const exact = getByHint(row, ["综合得分", "缁煎悎寰楀垎", "risk_score"], 0);
+    const n = Number(exact || 0);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function getDiagnosis(row) {
+    return cleanText(getByHint(row, ["经营诊断", "缁忚惀璇婃柇", "categories"], "--"));
+}
+
+function getContract(row) {
+    const value = Number(getByHint(row, ["签约额（亿元）", "合同总额（亿元）", "绛剧害棰濓紙浜垮厓", "contract_yi"], 0));
+    return Number.isFinite(value) ? value : 0;
+}
+
+function renderKpis() {
+    const topUnit = cleanText(summary.top_unit || "--");
+    const cards = [
+        ["bi-diagram-3", "覆盖二级单位", fmtNumber(summary.covered_units), "已纳入经营画像的二级单位数", "ops-kpi-info"],
+        ["bi-geo-alt", "覆盖城市", fmtNumber(summary.covered_cities), "形成城市级经营对标", "ops-kpi-info"],
+        ["bi-shield-exclamation", "高风险项目", fmtNumber(summary.high_risk_project_count), "多模型叠加后需重点盯控", "ops-kpi-danger"],
+        ["bi-trophy", "最高得分单位", topUnit, `${fmtNumber(summary.top_unit_score, 1)} 分`, "ops-kpi-warning"]
+    ];
+    document.getElementById("kpiGrid").innerHTML = cards.map(([icon, label, value, sub, klass]) => `
+        <article class="ops-kpi-card ${klass}">
+            <span class="kpi-icon"><i class="bi ${icon}"></i></span>
+            <span class="kpi-label">${label}</span>
+            <strong class="kpi-value">${value}</strong>
+            <span class="kpi-sub">${sub}</span>
+        </article>
+    `).join("");
+}
+
+function renderMiniKpis() {
+    const source = overview.kpis || {};
+    const defaults = [
+        ["区域渗透率", "落地城市数 ÷ 授权深耕+重点城市数"],
+        ["跨区域经营指数", "非常规区域合同额 ÷ 总合同额"],
+        ["战略客户产出比", "战略/优质客户合同额 ÷ 总合同额"],
+        ["风险项目占比", "触碰红线或限制投标项目数 ÷ 总项目数"],
+        ["产值转化率", "实际完成产值 ÷ 签约额"],
+        ["资金回收率", "累计收款 ÷ 签约额"]
+    ];
+    const rawValues = Object.values(source);
+    document.getElementById("miniKpiGrid").innerHTML = defaults.map(([label, formula], index) => {
+        const raw = rawValues[index];
+        const value = typeof raw === "object" && raw ? raw.value : raw;
+        const finalFormula = typeof raw === "object" && raw?.formula ? raw.formula : formula;
+        const tone = ["mini-kpi-info", "mini-kpi-stable", "mini-kpi-warning", "mini-kpi-info", "mini-kpi-stable", "mini-kpi-danger"][index] || "mini-kpi-info";
+        return `
+            <div class="mini-kpi-card ${tone}">
+                <span>${label}</span>
+                <strong>${fmtNumber(value, 1)}%</strong>
+                <em>${cleanText(finalFormula)}</em>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderScoreZones() {
+    const scoreBand = overview.score_band || {};
+    const values = Object.values(scoreBand).map((value) => Number(value || 0));
+    const zones = [
+        ["强势区", values[0] || 0, "综合得分 ≥ 80", "score-zone-strong"],
+        ["稳健区", values[1] || 0, "65 ≤ 综合得分 < 80", "score-zone-steady"],
+        ["承压区", values[2] || 0, "综合得分 < 65", "score-zone-pressure"]
+    ];
+    document.getElementById("scoreZoneRow").innerHTML = zones.map(([label, value, formula, klass]) => `
+        <div class="score-zone ${klass}">
+            <span>${label}</span>
+            <strong>${fmtNumber(value)}</strong>
+            <em>${formula}</em>
+        </div>
+    `).join("");
+}
+
+function drawRadar() {
+    const canvas = document.getElementById("moduleRadarCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const ratio = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width || 520;
+    const height = rect.height || 420;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const cx = width / 2;
+    const cy = height / 2 + 4;
+    const radius = Math.min(width, height) * 0.27;
+    const angleStep = (Math.PI * 2) / moduleLabels.length;
+
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.22)";
+    ctx.lineWidth = 1;
+    for (let level = 1; level <= 5; level += 1) {
+        const r = radius * (level / 5);
+        ctx.beginPath();
+        moduleLabels.forEach((_, i) => {
+            const angle = -Math.PI / 2 + angleStep * i;
+            const x = cx + Math.cos(angle) * r;
+            const y = cy + Math.sin(angle) * r;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+    moduleLabels.forEach((label, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+        ctx.stroke();
+        const labelX = cx + Math.cos(angle) * (radius + 54);
+        const labelY = cy + Math.sin(angle) * (radius + 42);
+        ctx.fillStyle = "#52677d";
+        ctx.font = '600 12px "Microsoft YaHei UI", "PingFang SC", sans-serif';
+        ctx.textAlign = labelX > cx + 8 ? "left" : labelX < cx - 8 ? "right" : "center";
+        ctx.textBaseline = labelY > cy ? "top" : "bottom";
+        ctx.fillText(label, labelX, labelY);
+    });
+
+    ctx.beginPath();
+    moduleScoreValues.forEach((value, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        const r = radius * Math.max(0, Math.min(100, value)) / 100;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    const gradient = ctx.createRadialGradient(cx, cy, radius * 0.1, cx, cy, radius);
+    gradient.addColorStop(0, "rgba(30, 136, 229, 0.30)");
+    gradient.addColorStop(1, "rgba(30, 136, 229, 0.08)");
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = "#1e88e5";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+
+    moduleScoreValues.forEach((value, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        const r = radius * Math.max(0, Math.min(100, value)) / 100;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.strokeStyle = "#1e88e5";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    });
+}
+
+const tableConfig = {
+    subsidiaries: {
+        rows: subsidiaries,
+        columns: ["单位", "综合得分", "项目数", "合同额（亿元）", "经营诊断"],
+        render(row) {
+            return [getName(row), `<span class="score-pill">${fmtNumber(getScore(row), 1)}</span>`, fmtNumber(getProjectCount(row)), fmtNumber(getContract(row), 2), getDiagnosis(row)];
+        }
+    },
+    cities: {
+        rows: cities,
+        columns: ["城市", "综合得分", "项目数", "合同额（亿元）", "经营诊断"],
+        render(row) {
+            return [getName(row), `<span class="score-pill">${fmtNumber(getScore(row), 1)}</span>`, fmtNumber(getProjectCount(row)), fmtNumber(getContract(row), 2), getDiagnosis(row)];
+        }
+    },
+    projects: {
+        rows: focusProjects,
+        columns: ["项目名称", "风险分", "红/黄预警", "合同额（亿元）", "风险类别"],
+        render(row) {
+            return [
+                cleanText(row.project_name || getName(row)),
+                `<span class="score-pill">${fmtNumber(row.risk_score || getScore(row))}</span>`,
+                `${fmtNumber(row.red_count)} / ${fmtNumber(row.yellow_count)}`,
+                fmtNumber(row.contract_yi || getContract(row), 2),
+                cleanText(row.categories || getDiagnosis(row))
+            ];
+        }
+    }
+};
+
+function renderTable(tab = "subsidiaries") {
+    const config = tableConfig[tab];
+    const table = document.getElementById("benchmarkTable");
+    table.querySelector("thead").innerHTML = `<tr>${config.columns.map((col) => `<th>${col}</th>`).join("")}</tr>`;
+    if (!config.rows.length) {
+        table.querySelector("tbody").innerHTML = `<tr><td class="empty-cell" colspan="${config.columns.length}">暂无数据</td></tr>`;
+        return;
+    }
+    table.querySelector("tbody").innerHTML = config.rows.slice(0, 12).map((row) => {
+        const cells = config.render(row);
+        return `<tr>${cells.map((cell, index) => `<td class="${index > 0 && index < 4 ? "center" : ""}">${cell}</td>`).join("")}</tr>`;
+    }).join("");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    renderKpis();
+    renderMiniKpis();
+    renderScoreZones();
+    drawRadar();
+    renderTable();
+
+    document.querySelectorAll("#tabSwitch button").forEach((button) => {
+        button.addEventListener("click", () => {
+            document.querySelectorAll("#tabSwitch button").forEach((item) => item.classList.remove("active"));
+            button.classList.add("active");
+            renderTable(button.dataset.tab);
+        });
+    });
+});
+window.addEventListener("resize", drawRadar);
+</script>
+{% endblock %}

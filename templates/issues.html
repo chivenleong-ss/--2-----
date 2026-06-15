@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% block title %}风险仪表板{% endblock %}
+{% block nav_issues %}active{% endblock %}
+
+{% block content %}
+<div class="ops-shell">
+    <section class="hero-board">
+        <div class="hero-copy">
+            <div class="hero-kicker">AUDIT DASHBOARD</div>
+            <h1>风险仪表板</h1>
+            <p>从审计结果视角出发，聚合各模型发现的风险问题，支持按严重等级、问题分类和模型维度快速查看整体态势。</p>
+        </div>
+    </section>
+
+    <section class="kpi-grid">
+        <article class="kpi-card accent-blue">
+            <span class="kpi-label">发现问题总数</span>
+            <strong class="kpi-value">{{ stats.total_issues or 0 }}</strong>
+            <span class="kpi-foot">所有模型识别出的风险问题总量</span>
+        </article>
+        <article class="kpi-card accent-cyan">
+            <span class="kpi-label">模型覆盖数</span>
+            <strong class="kpi-value">{{ stats.models | selectattr('total', 'gt', 0) | list | length }}</strong>
+            <span class="kpi-foot">本批次有输出结果的模型数量</span>
+        </article>
+        <article class="kpi-card accent-red">
+            <span class="kpi-label">重大风险占比</span>
+            {% set total_issues = stats.total_issues or 0 %}
+            {% set red_ratio = ((stats.total_red / total_issues) * 100) if total_issues else 0 %}
+            <strong class="kpi-value">{{ "%.1f"|format(red_ratio) }}%</strong>
+            <span class="kpi-foot">重大风险问题数 ÷ 问题总数</span>
+        </article>
+        <article class="kpi-card accent-yellow">
+            {% set yellow_ratio = ((stats.total_yellow / total_issues) * 100) if total_issues else 0 %}
+            <span class="kpi-label">预警占比</span>
+            <strong class="kpi-value">{{ "%.1f"|format(yellow_ratio) }}%</strong>
+            <span class="kpi-foot">预警问题数 ÷ 问题总数</span>
+        </article>
+    </section>
+
+    {% if stats.total_issues > 0 %}
+    <section class="board-grid">
+        <article class="panel-card panel-radar">
+            <div class="panel-head">
+                <div>
+                    <span class="panel-eyebrow">RISK OVERVIEW</span>
+                    <h2>风险态势雷达</h2>
+                </div>
+            </div>
+            <div class="panel-body radar-wrap">
+                <canvas id="overviewRadarCanvas" width="520" height="360"></canvas>
+            </div>
+        </article>
+
+        <article class="panel-card">
+            <div class="panel-head split-head">
+                <div>
+                    <span class="panel-eyebrow">ISSUE DETAILS</span>
+                    <h2>问题明细表单</h2>
+                </div>
+                <div class="tab-switch">
+                    <button class="tab-btn active" type="button" data-panel="top-categories-panel">高频问题类别 TOP 10</button>
+                    <button class="tab-btn" type="button" data-panel="model-details-panel">各模型问题明细</button>
+                </div>
+            </div>
+
+            <div class="table-panel active" id="top-categories-panel">
+                {% if stats.top_categories %}
+                <div class="table-wrap">
+                    <table class="data-table top-category-table">
+                        <colgroup>
+                            <col class="col-seq">
+                            <col class="col-issue-cat">
+                            <col class="col-qty">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="center">序号</th>
+                                <th class="cat-col">问题类别</th>
+                                <th class="center">数量</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cat, cnt in (stats.top_categories or {}).items() %}
+                            <tr>
+                                <td class="center">{{ loop.index }}</td>
+                                <td class="cat-col">{{ cat }}</td>
+                                <td class="center"><strong>{{ cnt }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-lite">暂无高频问题类别数据</div>
+                {% endif %}
+            </div>
+
+            <div class="table-panel" id="model-details-panel">
+                {% if stats.models %}
+                <div class="table-wrap">
+                    <table class="data-table model-summary-table">
+                        <colgroup>
+                            <col class="col-model-id">
+                            <col class="col-model-name">
+                            <col class="col-total">
+                            <col class="col-red">
+                            <col class="col-yellow">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="center">模型</th>
+                                <th>模型名称</th>
+                                <th class="center">总计</th>
+                                <th class="center">重大风险</th>
+                                <th class="center">预警</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for m in stats.models or [] %}
+                            <tr>
+                                <td class="col-model-id"><strong>{{ m.id }}</strong></td>
+                                <td class="col-model-name">{{ m.name }}</td>
+                                <td class="center"><strong>{{ m.total }}</strong></td>
+                                <td class="center">{% if m.red > 0 %}<span class="badge-sev badge-red">{{ m.red }}</span>{% else %}0{% endif %}</td>
+                                <td class="center">{% if m.yellow > 0 %}<span class="badge-sev badge-yellow">{{ m.yellow }}</span>{% else %}0{% endif %}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-lite">暂无模型问题明细</div>
+                {% endif %}
+            </div>
+        </article>
+    </section>
+    {% else %}
+    <section class="panel-card">
+        <div class="empty-lite large">暂无数据，请先上传文件并运行审计流程。</div>
+    </section>
+    {% endif %}
+
+    {% if stats.total_issues > 0 %}
+    <section class="panel-card model-detail-section">
+        <div class="panel-head">
+            <div>
+                <span class="panel-eyebrow">MODEL INSIGHT</span>
+                <h2>模型预警明细</h2>
+            </div>
+            <div class="summary-badges" id="detailBadges">
+                <span class="summary-badge badge-red">风险 0</span>
+                <span class="summary-badge badge-yellow">预警 0</span>
+                <span class="summary-badge badge-blue">总计 0</span>
+            </div>
+        </div>
+        <div class="model-detail-toolbar">
+            <select id="modelSelector" class="model-select">
+                <option value="">-- 选择模型 --</option>
+                {% for m in stats.models %}
+                {% if m.total > 0 %}
+                <option value="{{ m.id }}">{{ m.id }} {{ m.name }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+            <div class="table-filter-bar" id="detailFilterBar" hidden></div>
+        </div>
+        <div class="detail-table-wrap">
+            <table class="detail-table" id="detailTable">
+                <colgroup id="detailColgroup"></colgroup>
+                <thead id="detailHead"></thead>
+                <tbody id="detailBody">
+                    <tr><td class="empty-cell" colspan="20">请选择一个模型查看预警明细</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if stats.total_issues > 0 %}
+<script>
+const radarLabels = {{ (stats.top_categories.keys() | list)[:6] | tojson }};
+const radarValues = {{ (stats.top_categories.values() | list)[:6] | tojson }};
+
+function drawIssueRadar() {
+    const canvas = document.getElementById("overviewRadarCanvas");
+    if (!canvas || !radarLabels.length) return;
+
+    const ctx = canvas.getContext("2d");
+    const ratio = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const size = Math.min(rect.width || 520, rect.height || 360);
+    canvas.width = Math.floor(size * ratio);
+    canvas.height = Math.floor(size * ratio);
+    canvas.style.width = size + "px";
+    canvas.style.height = size + "px";
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+
+    const cx = size / 2;
+    const cy = size / 2 + 4;
+    const radius = size * 0.31;
+    const levels = 5;
+    const maxValue = Math.max(...radarValues, 1);
+    const angleStep = (Math.PI * 2) / radarLabels.length;
+
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.18)";
+    ctx.lineWidth = 1;
+    for (let level = 1; level <= levels; level += 1) {
+        const r = radius * (level / levels);
+        ctx.beginPath();
+        radarLabels.forEach((_, i) => {
+            const angle = -Math.PI / 2 + angleStep * i;
+            const x = cx + Math.cos(angle) * r;
+            const y = cy + Math.sin(angle) * r;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+    radarLabels.forEach((label, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        const outerX = cx + Math.cos(angle) * radius;
+        const outerY = cy + Math.sin(angle) * radius;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(outerX, outerY);
+        ctx.stroke();
+
+        const labelX = cx + Math.cos(angle) * (radius + 28);
+        const labelY = cy + Math.sin(angle) * (radius + 28);
+        ctx.fillStyle = "#5f6f82";
+        ctx.font = '600 12px "Microsoft YaHei UI", "PingFang SC", sans-serif';
+        ctx.textAlign = labelX >= cx + 8 ? "left" : labelX <= cx - 8 ? "right" : "center";
+        ctx.textBaseline = labelY >= cy ? "top" : "bottom";
+        ctx.fillText(label, labelX, labelY);
+    });
+
+    ctx.beginPath();
+    radarValues.forEach((value, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        const r = radius * (Number(value || 0) / maxValue);
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(30, 136, 229, 0.14)";
+    ctx.strokeStyle = "#1e88e5";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+
+    radarValues.forEach((value, i) => {
+        const angle = -Math.PI / 2 + angleStep * i;
+        const r = radius * (Number(value || 0) / maxValue);
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#1e88e5";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+    });
+}
+
+drawIssueRadar();
+window.addEventListener("resize", drawIssueRadar);
+
+document.querySelectorAll(".tab-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+        const target = button.dataset.panel;
+        document.querySelectorAll(".tab-btn").forEach((btn) => btn.classList.toggle("active", btn === button));
+        document.querySelectorAll(".table-panel").forEach((panel) => panel.classList.toggle("active", panel.id === target));
+    });
+});
+
+/* ── 模型预警明细 ── */
+const detailFilterDefs = [
+    { key: "问题分类", label: "问题分类" },
+    { key: "严重等级", label: "严重等级" },
+    { key: "项目名称", label: "项目名称" },
+];
+let currentDetailColumns = [];
+let currentDetailRows = [];
+const detailFilters = {};
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function cleanValue(value) { return value == null ? "" : String(value).trim(); }
+function isNumericColumnName(n) { return /金额|签约额|合同额|占比|比例|比率|数量|总计|问题数|项目数|得分|万元|亿元|元|count|amount|ratio|rate|pct/i.test(n); }
+function isMoneyColumnName(n) { return /金额|签约额|合同额|万元|亿元|元|amount/i.test(n); }
+
+function finalColSpec(columnName) {
+    if (/模型编号|模型$|序号|编号$|项目编码|项目编号|编码|代码/.test(columnName)) return { weight: 7, min: 6, max: 11, th: "align-center", td: "align-center" };
+    if (/严重等级|风险等级|等级|状态/.test(columnName)) return { weight: 8, min: 7, max: 12, th: "align-center", td: "align-center" };
+    if (/问题描述|风险详情|详情|描述|说明|原因|依据|规则/.test(columnName)) return { weight: 24, min: 16, max: 34, th: "align-left", td: "align-left", long: true };
+    if (/项目名称/.test(columnName)) return { weight: 15, min: 10, max: 24, th: "align-left", td: "align-left", long: true };
+    if (/客户名称|业主名称|客户|业主|单位/.test(columnName)) return { weight: 13, min: 9, max: 21, th: "align-left", td: "align-left", long: true };
+    if (/问题分类|风险分类|分类|类别|类型/.test(columnName)) return { weight: 12, min: 8, max: 18, th: "align-left", td: "align-left", long: true };
+    if (isMoneyColumnName(columnName)) return { weight: 10, min: 8, max: 14, th: "align-center", td: "align-center" };
+    if (isNumericColumnName(columnName)) return { weight: 8, min: 6, max: 11, th: "align-center", td: "align-center" };
+    return { weight: 10, min: 7, max: 18, th: "align-left", td: "align-left", long: true };
+}
+
+function displayLength(value) { return Array.from(String(value ?? "")).reduce((sum, ch) => sum + (/[一-鿿]/.test(ch) ? 2 : 1), 0); }
+function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+function contentAwareSpecs(columns, rows) {
+    const baseSpecs = columns.map(finalColSpec);
+    const scored = baseSpecs.map((spec, index) => {
+        const column = columns[index];
+        const lengths = (rows || []).slice(0, 80).map((row) => displayLength(row[column]));
+        const maxLen = Math.max(displayLength(column), ...lengths, 1);
+        const avgLen = lengths.length ? lengths.reduce((sum, len) => sum + len, 0) / lengths.length : displayLength(column);
+        const weight = clamp(spec.weight + Math.sqrt(maxLen) * 1.4 + Math.min(avgLen / 8, 5), spec.min, spec.max);
+        return { ...spec, weight };
+    });
+    const count = scored.length;
+    if (count > 0 && count <= 5 && scored.every((spec) => spec.weight <= spec.min + 8)) {
+        return scored.map((spec) => ({ ...spec, weight: 100 / count }));
+    }
+    return scored;
+}
+
+function severityKind(value) {
+    const text = String(value ?? "").trim();
+    const n = text.toLowerCase();
+    if (/红|严禁|严重|重大|高风险/.test(text) || n === "red") return "red";
+    if (/黄|限制|一般|预警|中风险/.test(text) || n === "yellow") return "yellow";
+    return "clean";
+}
+
+function severityBadge(value) {
+    const kind = severityKind(value);
+    if (kind === "red") return '<span class="severity-badge severity-red">风险</span>';
+    if (kind === "yellow") return '<span class="severity-badge severity-yellow">预警</span>';
+    return "";
+}
+
+function formatNumber(value) {
+    if (value === null || value === undefined || value === "") return "";
+    const num = Number(String(value).replace(/,/g, ""));
+    if (!Number.isFinite(num)) return escapeHtml(value);
+    return num.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function isYuanColumn(columnName) { return /元/.test(columnName) && !/万元|亿元/.test(columnName); }
+function toWan(value) {
+    const num = Number(String(value).replace(/,/g, ""));
+    if (!Number.isFinite(num)) return "0.00";
+    return (num / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+}
+
+function renderCell(columnName, value, spec) {
+    const raw = value ?? "";
+    if (/严重等级|风险等级|等级/.test(columnName)) return severityBadge(raw);
+    if (isYuanColumn(columnName)) return toWan(raw);
+    if (isNumericColumnName(columnName)) return formatNumber(raw);
+    const text = escapeHtml(raw);
+    if (spec.long) return '<span class="cell-long" title="' + escapeHtml(raw) + '">' + text + '</span>';
+    return text;
+}
+
+function distinctFilterValues(rows, column) {
+    return Array.from(new Set((rows || []).map((row) => cleanValue(row[column])).filter(Boolean)))
+        .sort((a, b) => String(a).localeCompare(String(b), "zh-CN"));
+}
+
+function applyDetailFilters(rows) {
+    return (rows || []).filter((row) =>
+        detailFilterDefs.every(({ key }) => !detailFilters[key] || cleanValue(row[key]) === detailFilters[key])
+    );
+}
+
+function renderDetailFilters(columns, rows) {
+    const bar = document.getElementById("detailFilterBar");
+    const available = detailFilterDefs.filter(({ key }) => columns.includes(key));
+    if (!available.length) { bar.hidden = true; bar.innerHTML = ""; return; }
+    bar.hidden = false;
+    bar.innerHTML = available.map(({ key, label }) => {
+        const options = distinctFilterValues(rows, key);
+        return '<div class="table-filter-item"><label>' + label + '</label><select id="filter-' + key + '" data-key="' + key + '"><option value="">全部</option>' + options.map((item) => '<option value="' + escapeHtml(item) + '"' + (detailFilters[key] === item ? " selected" : "") + '>' + escapeHtml(item) + '</option>').join("") + '</select></div>';
+    }).join("");
+    bar.querySelectorAll("select").forEach((select) => {
+        select.addEventListener("change", (event) => {
+            detailFilters[event.target.dataset.key] = event.target.value;
+            renderDetailTable(currentDetailColumns, applyDetailFilters(currentDetailRows));
+        });
+    });
+}
+
+function renderBadges(rows) {
+    const getSeverity = (row) => String(row["严重等级"] || row["风险等级"] || row["等级"] || "");
+    const red = rows.filter((row) => severityKind(getSeverity(row)) === "red").length;
+    const yellow = rows.filter((row) => severityKind(getSeverity(row)) === "yellow").length;
+    document.getElementById("detailBadges").innerHTML =
+        '<span class="summary-badge badge-red">风险 ' + red + '</span>' +
+        '<span class="summary-badge badge-yellow">预警 ' + yellow + '</span>' +
+        '<span class="summary-badge badge-blue">总计 ' + rows.length + '</span>';
+}
+
+function renderDetailTable(columns, rows) {
+    const colgroup = document.getElementById("detailColgroup");
+    const head = document.getElementById("detailHead");
+    const body = document.getElementById("detailBody");
+    if (!columns.length || !rows.length) {
+        colgroup.innerHTML = ""; head.innerHTML = "";
+        body.innerHTML = '<tr><td class="empty-cell" colspan="20">暂无数据</td></tr>';
+        renderBadges([]); return;
+    }
+    const specs = contentAwareSpecs(columns, rows);
+    const totalWeight = specs.reduce((sum, spec) => sum + spec.weight, 0);
+    colgroup.innerHTML = specs.map((spec) => '<col style="width:' + ((spec.weight / totalWeight) * 100).toFixed(2) + '%">').join("");
+    head.innerHTML = '<tr>' + columns.map((column, index) => '<th class="' + specs[index].th + '">' + escapeHtml(column) + '</th>').join("") + '</tr>';
+    body.innerHTML = rows.map((row) => {
+        return '<tr>' + columns.map((column, index) => '<td class="' + specs[index].td + '">' + renderCell(column, row[column], specs[index]) + '</td>').join("") + '</tr>';
+    }).join("");
+    renderBadges(rows);
+}
+
+async function loadModel(modelId) {
+    const response = await fetch("/api/model/" + encodeURIComponent(modelId), { cache: "no-store" });
+    if (!response.ok) { currentDetailColumns = []; currentDetailRows = []; renderDetailFilters([], []); renderDetailTable([], []); return; }
+    const data = await response.json();
+    currentDetailColumns = (data.columns || []).filter((col) => col !== "模型编号").map((col) => col === "签约额（元）" ? "签约额（万元）" : col);
+    currentDetailRows = data.rows || [];
+    detailFilterDefs.forEach(({ key }) => { detailFilters[key] = ""; });
+    renderDetailFilters(currentDetailColumns, currentDetailRows);
+    renderDetailTable(currentDetailColumns, currentDetailRows);
+}
+
+document.getElementById("modelSelector").addEventListener("change", function() {
+    if (this.value) loadModel(this.value);
+});
+</script>
+{% endif %}
+
+<style>
+.ops-shell { display: flex; flex-direction: column; gap: 18px; }
+.hero-board {
+    padding: 22px 24px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.36);
+    border-radius: 10px;
+    background:
+        radial-gradient(circle at top left, rgba(57, 152, 255, 0.18), rgba(57, 152, 255, 0) 34%),
+        linear-gradient(135deg, rgba(255,255,255,0.48) 0%, rgba(247,251,255,0.34) 52%, rgba(238,246,255,0.28) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 45px rgba(23, 35, 52, 0.10);
+}
+.hero-board::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.08) 55%, rgba(186,220,255,0.10) 100%);
+    pointer-events: none;
+}
+.hero-board > * {
+    position: relative;
+    z-index: 1;
+}
+.hero-kicker, .panel-eyebrow { display: inline-block; color: #2782d6; font-size: 11px; font-weight: 800; letter-spacing: 0.14em; }
+.hero-copy h1 { margin: 10px 0 8px; font-size: 30px; line-height: 1.08; color: #143a61; font-weight: 800; }
+.hero-copy p { margin: 0; max-width: 760px; color: #667b90; font-size: 14px; line-height: 1.7; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.kpi-card { background: #fff; border: 1px solid #dce8f6; border-radius: 8px; padding: 14px 16px; min-height: 120px; box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04); position: relative; display: flex; flex-direction: column; }
+.kpi-card::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 3px; border-radius: 999px; }
+.accent-blue::after { background: linear-gradient(90deg, #1e88e5, #90caf9); }
+.accent-cyan::after { background: linear-gradient(90deg, #00acc1, #80deea); }
+.accent-red::after { background: linear-gradient(90deg, #ef5350, #ef9a9a); }
+.accent-yellow::after { background: linear-gradient(90deg, #f59e0b, #fde68a); }
+.kpi-label { display: block; color: #73879c; font-size: 18px; font-weight: 800; line-height: 1.2; }
+.kpi-value { margin-top: 12px; color: #143a61; font-family: "SF Pro Display", "Inter", "Helvetica Neue", sans-serif; font-size: 30px; line-height: 1; font-weight: 800; }
+.kpi-foot { display: block; margin-top: auto; padding-bottom: 2px; color: #8da0b2; font-size: 12px; line-height: 1.5; }
+.board-grid { display: grid; grid-template-columns: 0.95fr 1.45fr; gap: 14px; }
+.panel-card { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: 16px; box-shadow: var(--glass-shadow); overflow: hidden; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #edf2f7; }
+.panel-head h2 { margin: 6px 0 0; font-size: 18px; line-height: 1.2; font-weight: 800; color: #143a61; }
+.panel-body { padding: 16px 18px 18px; }
+.radar-wrap { min-height: 360px; padding: 18px; display: flex; align-items: center; justify-content: center; }
+#overviewRadarCanvas { display: block; }
+.split-head { flex-wrap: wrap; }
+.tab-switch { display: inline-flex; gap: 6px; padding: 4px; border: 1px solid #e6edf6; border-radius: 8px; background: #f6f9fc; }
+.tab-btn { border: 0; background: transparent; color: #70859a; font-size: 12px; font-weight: 700; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+.tab-btn.active { background: #1f89df; color: #fff; }
+.table-panel { display: none; }
+.table-panel.active { display: block; }
+.table-wrap { overflow-x: hidden; padding: 14px 18px 18px; }
+.data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; table-layout: fixed; background: rgba(255,255,255,0.30); border: 1px solid rgba(191, 219, 254, 0.24); border-radius: 14px; overflow: hidden; }
+.data-table th { background: rgba(255,255,255,0.56); padding: 10px 14px; text-align: center; font-weight: 700; color: #445468; border-bottom: 1px solid rgba(232, 238, 246, 0.78); vertical-align: middle; white-space: normal; word-break: break-word; overflow-wrap: anywhere; line-height: 1.35; }
+.data-table td { padding: 10px 14px; border-bottom: 1px solid rgba(238, 242, 247, 0.72); color: #374151; vertical-align: middle; line-height: 1.5; background: rgba(255,255,255,0.16); white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+.data-table tbody tr:hover { background: rgba(31, 137, 223, 0.06); }
+.center, .data-table th.center, .data-table td.center { text-align: center; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: normal; overflow-wrap: anywhere; }
+.cat-col { padding-left: 18px !important; padding-right: 18px !important; text-align: center; }
+.top-category-table .col-seq { width: 18%; }
+.top-category-table .col-issue-cat { width: 56%; }
+.top-category-table .col-qty { width: 26%; }
+.top-category-table th:first-child,
+.top-category-table td:first-child { padding-left: 22px; padding-right: 18px; }
+.top-category-table th:last-child,
+.top-category-table td:last-child { padding-left: 20px; padding-right: 20px; }
+.model-summary-table .col-model-id { width: 14%; }
+.model-summary-table .col-model-name { width: 38%; }
+.model-summary-table .col-total,
+.model-summary-table .col-red,
+.model-summary-table .col-yellow { width: 16%; }
+.model-summary-table td.col-model-id { text-align: center; }
+.model-summary-table td.col-model-name { white-space: normal; word-break: break-word; overflow-wrap: anywhere; line-height: 1.5; }
+.model-summary-table th.center,
+.model-summary-table td.center { padding-left: 12px; padding-right: 12px; }
+.badge-sev { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.badge-red { background: #fff1f2; color: #dc2626; }
+.badge-yellow { background: #fef3c7; color: #d97706; }
+.empty-lite { padding: 30px 18px; color: #8da0b2; font-size: 13px; text-align: center; }
+.empty-lite.large { padding: 40px 20px; font-size: 14px; }
+@media (max-width: 1200px) {
+    .board-grid { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+    .kpi-grid { grid-template-columns: 1fr; }
+    .tab-switch { width: 100%; overflow-x: auto; }
+}
+
+/* ── 模型预警明细（融合自 models.html） ── */
+.model-detail-section { margin-top: 18px; }
+.model-detail-section .panel-head { align-items: center; }
+.model-detail-toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 18px 0; align-items: center; }
+.model-select {
+    height: 36px; min-width: 280px;
+    border: 1px solid #dbe7f3; border-radius: 8px;
+    padding: 0 12px; background: #fff; color: #27415d;
+    font-size: 13px; font-weight: 700;
+}
+.summary-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.summary-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 70px; padding: 6px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 800; white-space: nowrap;
+}
+.badge-red { background: #fef2f2; color: #b91c1c; border: 1px solid rgba(185,28,28,0.14); }
+.badge-yellow { background: #fffbeb; color: #b45309; border: 1px solid rgba(180,83,9,0.16); }
+.badge-blue { background: #eff6ff; color: #2563eb; border: 1px solid rgba(37,99,235,0.14); }
+.table-filter-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; }
+.table-filter-item { display: flex; align-items: center; gap: 6px; }
+.table-filter-item label { color: #5f758c; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.table-filter-item select {
+    height: 30px; border: 1px solid #dbe7f3; border-radius: 6px;
+    padding: 0 8px; background: #fff; color: #27415d; font-size: 11px;
+}
+.detail-table-wrap {
+    margin: 12px 14px 16px; overflow-x: auto;
+    border: 1px solid rgba(191,219,254,0.24); border-radius: 12px;
+    background: rgba(255,255,255,0.42);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.detail-table {
+    width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0;
+    table-layout: fixed; font-size: 11px; font-variant-numeric: tabular-nums;
+    background: rgba(255,255,255,0.24);
+}
+.detail-table thead th {
+    height: 40px; padding: 4px 8px;
+    background: rgba(255,255,255,0.58); color: #153b63;
+    border-bottom: 1px solid rgba(203,213,225,0.72);
+    font-weight: 800; text-align: center; vertical-align: middle;
+    white-space: normal; word-break: break-word; line-height: 1.3;
+}
+.detail-table tbody td {
+    height: 36px; padding: 5px 8px;
+    border-bottom: 1px solid rgba(226,232,240,0.72);
+    color: #334155; vertical-align: middle; line-height: 1.4;
+    background: rgba(255,255,255,0.14);
+    white-space: normal; word-break: break-word;
+}
+.detail-table tbody tr:last-child td { border-bottom: 0; }
+.detail-table tbody tr:hover { background: rgba(31,137,223,0.04); }
+.detail-table .align-left { text-align: left; }
+.detail-table .align-center { text-align: center; vertical-align: middle; }
+.detail-table .align-money { text-align: center; }
+.cell-long { display: block; white-space: normal; word-break: break-word; line-height: 1.45; }
+.severity-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 56px; padding: 3px 10px; border-radius: 999px;
+    font-size: 10px; font-weight: 800; white-space: nowrap;
+}
+.severity-red { background: #fef2f2; color: #b91c1c; border: 1px solid rgba(185,28,28,0.14); }
+.severity-yellow { background: #fffbeb; color: #b45309; border: 1px solid rgba(180,83,9,0.16); }
+</style>
+{% endblock %}

@@ -1,0 +1,26 @@
+{
+  "bid_report": {
+    "original_filename": "中标报量导出数据文件-1780290929280.xlsx",
+    "saved_as": "bid_report.xlsx",
+    "size": 390083,
+    "mtime": "2026-06-15T18:35:03.096391"
+  },
+  "appendix": {
+    "original_filename": "审计附表.xlsx",
+    "saved_as": "appendix.xlsx",
+    "size": 70091,
+    "mtime": "2026-06-15T18:35:03.101101"
+  },
+  "dmp_sales": {
+    "original_filename": "签约报量（四局）_2026-06-01 13_14_55.xlsx",
+    "saved_as": "dmp_sales.xlsx",
+    "size": 480872,
+    "mtime": "2026-06-15T18:35:03.104664"
+  },
+  "qcc_risk": {
+    "original_filename": "风险排查.xlsx",
+    "saved_as": "qcc_risk.xlsx",
+    "size": 174849,
+    "mtime": "2026-06-15T18:35:03.104664"
+  }
+}

@@ -1,0 +1,1090 @@
+{% extends "base.html" %}
+{% block title %}数字化审计工作台{% endblock %}
+{% block nav_upload %}active{% endblock %}
+
+{% block content %}
+<div class="studio-shell">
+    <section class="panel-card upload-panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">DATA INGESTION</span>
+                <h2>文件上传</h2>
+            </div>
+            <input type="file" id="batchFileInput" accept=".xlsx,.xls,.csv,.txt" multiple hidden>
+            <button class="cta-btn" type="button" id="batchUploadBtn">
+                <i class="bi bi-cloud-arrow-up"></i>
+                批量上传文件
+            </button>
+        </div>
+        <p class="section-desc">一次上传全部源文件，系统会自动识别中标报量、签约报量、审计附表和企业信息。</p>
+        <div class="upload-slot-grid" id="uploadSlotGrid"></div>
+    </section>
+
+    <section class="panel-card action-panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">PRE-FILTER LAYER</span>
+                <h2>前置过滤层</h2>
+            </div>
+            <button class="cta-btn" type="button" id="prefilterBtn">
+                <i class="bi bi-funnel-fill"></i>
+                运行前置过滤
+            </button>
+        </div>
+        <div class="prefilter-summary" id="prefilterSummaryCard">
+            <div class="run-status" id="prefilterStatus">请先上传全部必传文件，再运行前置过滤层。</div>
+            <div class="prefilter-metrics" id="prefilterMetrics" hidden>
+                <div class="summary-grid">
+                    <article class="kpi-card kpi-hero">
+                        <span><i class="bi bi-shield-exclamation"></i> 未开工剔除</span>
+                        <strong id="pfExcludedCount">0</strong>
+                        <em>项</em>
+                    </article>
+                    <article class="kpi-card kpi-blue">
+                        <span>过滤前项目数</span>
+                        <strong id="pfBeforeCount">0</strong>
+                        <em>DMP签约报量全量</em>
+                    </article>
+                    <article class="kpi-card kpi-green">
+                        <span>过滤后项目数</span>
+                        <strong id="pfAfterCount">0</strong>
+                        <em>进入审计模型的有效盘</em>
+                    </article>
+                    <article class="kpi-card kpi-amber">
+                        <span>停工 / 退场 / 停缓建</span>
+                        <strong id="pfStoppedCount">0</strong>
+                        <em>保留供模型2.2盈利分析</em>
+                    </article>
+                </div>
+            </div>
+            <div class="prefilter-list-grid" id="prefilterListGrid" hidden>
+                <div class="prefilter-list-card">
+                    <div class="prefilter-list-head">
+                        <div class="list-head-left">
+                            <strong>剔除未开工异常清单</strong>
+                            <span id="unstartedCountBadge">0 项</span>
+                        </div>
+                        <div class="list-head-tags" id="unstartedSummaryTags"></div>
+                    </div>
+                    <div class="prefilter-empty" id="unstartedEmpty">当前无剔除未开工异常项目。</div>
+                    <div class="prefilter-records" id="unstartedList"></div>
+                    <button class="link-btn" id="toggleUnstartedBtn" type="button" hidden>展开全部</button>
+                </div>
+                <div class="prefilter-list-card">
+                    <div class="prefilter-list-head">
+                        <div class="list-head-left">
+                            <strong>停工 / 退场 / 停缓建项目清单</strong>
+                            <span id="stoppedCountBadge">0 项</span>
+                        </div>
+                        <div class="list-head-tags" id="stoppedSummaryTags"></div>
+                    </div>
+                    <div class="prefilter-empty" id="stoppedEmpty">当前无停工/退场/停缓建项目。</div>
+                    <div class="prefilter-records" id="stoppedList"></div>
+                    <button class="link-btn" id="toggleStoppedBtn" type="button" hidden>展开全部</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel-card model-board">
+        <div class="panel-head model-board-head">
+            <div>
+                <span class="eyebrow">MODEL EXECUTION</span>
+                <h2>模型执行</h2>
+            </div>
+            <div class="model-actions">
+                <button id="runBtn" class="cta-btn" type="button">
+                    <i class="bi bi-play-fill"></i>
+                    开始穿透审计
+                </button>
+                <button id="selectAllBtn" class="tiny-btn" type="button">全选</button>
+                <button id="clearAllBtn" class="tiny-btn" type="button">清空</button>
+            </div>
+        </div>
+
+        {% set dims = [
+            ("维度一：战略与布局", ["1.1", "1.2", "1.3", "1.4"]),
+            ("维度二：合同质量与风险", ["2.1", "2.2", "2.3", "2.4", "2.5"]),
+            ("维度三：客户健康度", ["3.1", "3.2"])
+        ] %}
+
+        <div id="modelSelectionArea">
+            {% for dim_label, dim_models in dims %}
+            <div class="model-category">
+                <div class="category-head">
+                    <span class="category-bar"></span>
+                    <span class="category-label">{{ dim_label }}</span>
+                </div>
+                <div class="model-card-grid">
+                    {% for mid in dim_models %}
+                    <label class="model-card-item selected" id="mcard-{{ mid }}" data-model-id="{{ mid }}">
+                        <div class="model-card-main">
+                            <div class="model-card-hero">
+                                <div class="model-card-icon-shell">
+                                    <div class="model-card-icon-box">
+                                        <i class="bi bi-box-seam-fill model-card-icon" id="model-icon-{{ mid }}"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="model-card-info">
+                                <span class="model-card-code">{{ mid }}</span>
+                                <span class="model-card-desc">{{ models[mid].name }}</span>
+                            </div>
+                        </div>
+                        <div class="model-card-risk" id="risk-{{ mid }}" aria-hidden="true">
+                            <span class="risk-line risk-line-red" id="risk-line-red-{{ mid }}" hidden>
+                                <i class="bi bi-exclamation-octagon-fill"></i>
+                                <strong id="risk-red-{{ mid }}">0</strong>
+                                <em>重大风险</em>
+                            </span>
+                            <span class="risk-line risk-line-yellow" id="risk-line-yellow-{{ mid }}" hidden>
+                                <i class="bi bi-exclamation-circle-fill"></i>
+                                <strong id="risk-yellow-{{ mid }}">0</strong>
+                                <em>预警</em>
+                            </span>
+                        </div>
+                        <input type="checkbox" class="model-check" value="{{ mid }}" checked>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="run-bar">
+            <div>
+                <div id="runStatus" class="run-status">请先上传必传文件并运行前置过滤层。</div>
+                <div id="strategicScopeHint" class="strategic-scope-hint">
+                    <span class="scope-badge">战略规划口径</span>
+                    <span id="strategicScopeText">上传必传文件后自动识别</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="report-cta-wrap" id="reportCta" hidden>
+            <a href="/discrete" class="report-cta-btn">
+                <i class="bi bi-arrow-right-circle-fill"></i>
+                跨区域经营风险-收益评估
+            </a>
+        </div>
+    </section>
+</div>
+
+<script id="slots-data" type="application/json">{{ slots | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const slots = JSON.parse(document.getElementById("slots-data").textContent);
+const RUN_ACTION_TOKEN = {{ run_action_token|tojson }};
+const slotOrder = ["bid_report", "dmp_sales", "appendix", "qcc_risk"];
+
+if (!slots.bid_report) {
+    slots.bid_report = {
+        label: "中标报量",
+        desc: "中标报量导出数据文件",
+        required: true
+    };
+} else {
+    slots.bid_report.label = "中标报量";
+    slots.bid_report.desc = "中标报量导出数据文件";
+    slots.bid_report.required = true;
+}
+
+if (!slots.dmp_sales) {
+    slots.dmp_sales = {
+        label: "签约报量",
+        desc: "签约报量导出数据文件",
+        required: true
+    };
+} else {
+    slots.dmp_sales.label = "签约报量";
+    slots.dmp_sales.desc = "签约报量导出数据文件";
+    slots.dmp_sales.required = true;
+}
+
+if (!slots.appendix) {
+    slots.appendix = {
+        label: "审计附表",
+        desc: "补充DMP中缺少字段",
+        required: true
+    };
+}
+
+if (!slots.qcc_risk) {
+    slots.qcc_risk = {
+        label: "企业信息",
+        desc: "企查查导出的风险排查表",
+        required: false
+    };
+} else {
+    slots.qcc_risk.label = "企业信息（企查查）";
+    slots.qcc_risk.desc = "企查查导出的风险排查表";
+    slots.qcc_risk.required = false;
+}
+
+function renderUploadSlots() {
+    const grid = byId("uploadSlotGrid");
+    if (!grid) return;
+    grid.innerHTML = slotOrder.map((key) => {
+        const info = slots[key];
+        if (!info) return "";
+        return `
+            <label class="slot-tile" id="slot-${key}">
+                <input type="file" id="file-${key}" accept=".xlsx,.xls,.csv,.txt" data-slot="${key}">
+                <div class="slot-top">
+                    <div class="slot-icon">
+                        <i class="bi bi-file-earmark-spreadsheet"></i>
+                    </div>
+                    <div class="slot-copy">
+                        <strong>${info.label || ""}</strong>
+                        <span>${info.desc || ""}</span>
+                    </div>
+                    <div class="slot-status" id="status-${key}">
+                        <span class="status-pending"><span class="pulse-dot"></span> 等待上传</span>
+                        <span class="status-done">
+                            <i class="bi bi-check-circle-fill"></i>
+                            <span id="filemeta-${key}"></span>
+                        </span>
+                    </div>
+                </div>
+                <div class="slot-fileline" id="fileline-${key}"></div>
+                <div class="slot-meta">
+                    <span class="${info.required ? "required-tag" : "optional-tag"}">${info.required ? "必传" : "可选"}</span>
+                </div>
+            </label>
+        `;
+    }).join("");
+}
+let uploadedFiles = {};
+let latestPrefilterSummary = null;
+let resultsReady = false;
+let pipelineState = "idle";
+let currentPollMode = null;
+let backendUploadsReady = false;
+let lastPipelineError = null;
+const PREFILTER_PREVIEW_LIMIT = 3;
+
+function runIntentHeaders() {
+    return {
+        "Content-Type": "application/json",
+        "X-Run-Intent": RUN_ACTION_TOKEN
+    };
+}
+
+function byId(id) {
+    return document.getElementById(id);
+}
+
+function notifyUser(message) {
+    window.alert(message);
+}
+
+function formatFileSize(size) {
+    if (!Number.isFinite(size)) return "";
+    if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function getSelectedModels() {
+    return Array.from(document.querySelectorAll(".model-check:checked")).map((el) => el.value);
+}
+
+function hasRequiredUploads() {
+    if (backendUploadsReady) return true;
+    return Object.entries(slots)
+        .filter(([, info]) => info.required)
+        .every(([key]) => Boolean(uploadedFiles[key]));
+}
+
+function hasPrefilterResults(summary) {
+    if (!summary || typeof summary !== "object") return false;
+    return Boolean(summary.prefilter_completed)
+        || Number(summary.before_project_count || 0) > 0
+        || Number(summary.after_project_count || 0) > 0
+        || Number(summary.excluded_unstarted_count || 0) > 0
+        || Number(summary.stopped_project_count || 0) > 0;
+}
+
+function markSlotPending(key) {
+    const slot = byId(`slot-${key}`);
+    const fileLine = byId(`fileline-${key}`);
+    const status = byId(`status-${key}`);
+    const pending = status?.querySelector(".status-pending");
+    const done = status?.querySelector(".status-done");
+    slot?.classList.remove("uploaded");
+    if (pending) pending.style.display = "inline-flex";
+    if (done) done.style.display = "none";
+    if (fileLine) {
+        fileLine.textContent = "";
+        fileLine.style.display = "none";
+    }
+}
+
+function markSlotUploaded(key, filename, size) {
+    const slot = byId(`slot-${key}`);
+    const fileLine = byId(`fileline-${key}`);
+    const fileMeta = byId(`filemeta-${key}`);
+    const status = byId(`status-${key}`);
+    const pending = status?.querySelector(".status-pending");
+    const done = status?.querySelector(".status-done");
+    slot?.classList.add("uploaded");
+    if (pending) pending.style.display = "none";
+    if (done) done.style.display = "inline-flex";
+    if (fileMeta) fileMeta.textContent = `已上传 · ${formatFileSize(size)}`;
+    if (fileLine) {
+        fileLine.textContent = filename || "";
+        fileLine.style.display = filename ? "block" : "none";
+    }
+}
+
+async function checkUploaded() {
+    try {
+        Object.keys(slots).forEach(markSlotPending);
+        const response = await fetch("/api/uploaded-files", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        uploadedFiles = {};
+        Object.entries(payload || {}).forEach(([key, info]) => {
+            const fileInfo = info?.file;
+            if (!info || !info.uploaded || !fileInfo) return;
+            uploadedFiles[key] = fileInfo;
+            markSlotUploaded(key, fileInfo.filename || "", fileInfo.size || 0);
+        });
+        backendUploadsReady = Object.entries(slots)
+            .filter(([, info]) => info.required)
+            .every(([key]) => Boolean(uploadedFiles[key]));
+    } catch (error) {
+        console.warn("上传状态同步失败", error);
+    }
+}
+
+async function refreshRuntimeCheck() {
+    try {
+        const response = await fetch("/api/runtime-check", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        backendUploadsReady = Boolean(payload.uploads_ready);
+    } catch (error) {
+        console.warn("运行状态检查失败", error);
+    }
+}
+
+async function refreshStrategicScope() {
+    const hint = byId("strategicScopeHint");
+    const text = byId("strategicScopeText");
+    if (!hint || !text) return;
+    try {
+        const response = await fetch("/api/strategic-scope", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            text.textContent = "识别失败";
+            return;
+        }
+        const scopeName = (payload.scope_name || "四局全局155基准").replace(" 专属155目标", "");
+        text.textContent = scopeName;
+    } catch (error) {
+        text.textContent = "识别失败";
+    }
+}
+
+async function uploadSingleFile(slot, file) {
+    lastPipelineError = null;
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("slot", slot);
+    const response = await fetch("/api/upload", { method: "POST", body: formData });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        notifyUser(payload.error || "文件上传失败");
+        return;
+    }
+    await checkUploaded();
+    await refreshStrategicScope();
+    updateRunButton();
+}
+
+async function uploadBatchFiles(files) {
+    if (!files || !files.length) return;
+    lastPipelineError = null;
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append("files", file));
+    const response = await fetch("/api/upload-batch", { method: "POST", body: formData });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 207) {
+        notifyUser(payload.error || "批量上传失败");
+        return;
+    }
+    await checkUploaded();
+    await refreshStrategicScope();
+    const messages = [];
+    if (Array.isArray(payload.uploaded) && payload.uploaded.length) {
+        messages.push(`已识别 ${payload.uploaded.length} 个文件`);
+    }
+    if (Array.isArray(payload.errors) && payload.errors.length) {
+        messages.push(...payload.errors.map((item) => `${item.filename || "文件"}：${item.error || "上传失败"}`));
+    }
+    const batchUploadTip = byId("batchUploadTip");
+    if (batchUploadTip) batchUploadTip.textContent = messages.length ? messages.join("；") : "批量上传完成。";
+    updateRunButton();
+}
+
+async function loadPrefilterSummary() {
+    if (!hasRequiredUploads()) {
+        latestPrefilterSummary = null;
+        renderPrefilterSummary();
+        updateRunButton();
+        return;
+    }
+    const response = await fetch("/api/prefilter", { cache: "no-store" });
+    if (!response.ok) {
+        latestPrefilterSummary = null;
+        renderPrefilterSummary();
+        updateRunButton();
+        return;
+    }
+    latestPrefilterSummary = await response.json();
+    renderPrefilterSummary();
+    updateRunButton();
+}
+
+function renderPrefilterSummary() {
+    const metrics = byId("prefilterMetrics");
+    const listGrid = byId("prefilterListGrid");
+    if (!metrics) {
+        return;
+    }
+    const summary = latestPrefilterSummary || {};
+    if (!hasPrefilterResults(summary)) {
+        metrics.hidden = true;
+        if (listGrid) listGrid.hidden = true;
+        return;
+    }
+    metrics.hidden = false;
+    if (listGrid) listGrid.hidden = false;
+    const unstarted = summary.unstarted_projects || [];
+    const stopped = summary.stopped_projects || [];
+
+    // ── 基础卡数字 ──
+    byId("pfBeforeCount").textContent = summary.before_project_count || 0;
+    byId("pfAfterCount").textContent = summary.after_project_count || 0;
+    byId("pfExcludedCount").textContent = summary.excluded_unstarted_count || 0;
+    byId("pfStoppedCount").textContent = summary.stopped_project_count || 0;
+    byId("unstartedCountBadge").textContent = `${unstarted.length} 项`;
+    byId("stoppedCountBadge").textContent = `${stopped.length} 项`;
+
+    // ── 核心指标卡：占比 + 进度条 ──
+    const beforeCount = summary.before_project_count || 0;
+    const excludedCount = summary.excluded_unstarted_count || 0;
+    const beforeAmt = summary.before_amount_yi || 0;
+    const excludedAmt = summary.excluded_unstarted_amount_yi || 0;
+    const projPct = beforeCount > 0 ? (excludedCount / beforeCount * 100) : 0;
+    const amtPct = beforeAmt > 0 ? (excludedAmt / beforeAmt * 100) : 0;
+
+    // ── 清单表头动态标签 ──
+    const unstartedTags = byId("unstartedSummaryTags");
+    if (unstartedTags && excludedCount > 0) {
+        unstartedTags.innerHTML =
+            `<span class="header-tag tag-danger">共剔除 ${excludedCount} 项 (占总数 ${projPct.toFixed(0)}%)</span>` +
+            `<span class="header-tag tag-warning">核减虚高合同额 ${excludedAmt.toFixed(1)} 亿 (占总盘 ${amtPct.toFixed(0)}%)</span>`;
+    } else if (unstartedTags) {
+        unstartedTags.innerHTML = "";
+    }
+
+    const stoppedTags = byId("stoppedSummaryTags");
+    const stoppedCount = summary.stopped_project_count || 0;
+    const stoppedAmt = summary.stopped_project_amount_yi || 0;
+    const stoppedProjPct = beforeCount > 0 ? (stoppedCount / beforeCount * 100) : 0;
+    const stoppedAmtPct = beforeAmt > 0 ? (stoppedAmt / beforeAmt * 100) : 0;
+    if (stoppedTags && stoppedCount > 0) {
+        stoppedTags.innerHTML =
+            `<span class="header-tag tag-warning">共 ${stoppedCount} 项 (占总数 ${stoppedProjPct.toFixed(0)}%)</span>` +
+            `<span class="header-tag tag-warning">涉及合同额 ${stoppedAmt.toFixed(1)} 亿 (占总盘 ${stoppedAmtPct.toFixed(0)}%)</span>`;
+    } else if (stoppedTags) {
+        stoppedTags.innerHTML = "";
+    }
+
+    renderProjectList("unstartedList", "unstartedEmpty", "toggleUnstartedBtn", unstarted, "unstarted");
+    renderProjectList("stoppedList", "stoppedEmpty", "toggleStoppedBtn", stopped, "stopped");
+}
+
+function renderProjectList(listId, emptyId, toggleId, items, type) {
+    const listEl = byId(listId);
+    const emptyEl = byId(emptyId);
+    const toggleEl = byId(toggleId);
+    if (!listEl || !emptyEl || !toggleEl) return;
+
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+        listEl.innerHTML = "";
+        emptyEl.style.display = "block";
+        toggleEl.hidden = true;
+        toggleEl.dataset.expanded = "false";
+        return;
+    }
+
+    emptyEl.style.display = "none";
+    const expanded = toggleEl.dataset.expanded === "true";
+    const visibleRows = expanded ? rows : rows.slice(0, PREFILTER_PREVIEW_LIMIT);
+    const bodyRows = visibleRows.map((item) => {
+        const amount = Number(item.contract_amount_yi || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return `
+            <tr>
+                <td>${item.project_code || "--"}</td>
+                <td>${item.project_name || "--"}</td>
+                <td><span class="status-pill">${item.unified_status || item.status || "--"}</span></td>
+                <td class="num">${amount}</td>
+                <td class="num">${(item.days_since_sign != null && item.days_since_sign >= 0) ? item.days_since_sign : "--"}</td>
+            </tr>
+        `;
+    }).join("");
+    listEl.innerHTML = `
+        <div class="prefilter-table-wrap">
+            <table class="prefilter-table">
+                <colgroup>
+                    <col><col><col><col><col>
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>项目编码</th>
+                        <th>项目名称</th>
+                        <th>状态</th>
+                        <th>合同额（亿元）</th>
+                        <th>签约后天数</th>
+                    </tr>
+                </thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        </div>
+    `;
+
+    if (rows.length > PREFILTER_PREVIEW_LIMIT) {
+        toggleEl.hidden = false;
+        toggleEl.textContent = expanded ? "收起" : `展开全部（${rows.length}项）`;
+    } else {
+        toggleEl.hidden = true;
+    }
+}
+
+function renderModelRiskStats(stats) {
+    const models = Array.isArray(stats?.models) ? stats.models : [];
+    resultsReady = models.some((model) => Number(model.total || 0) > 0);
+    byId("reportCta").hidden = !resultsReady;
+
+    const selectionArea = byId("modelSelectionArea");
+    if (resultsReady) selectionArea?.classList.add("results-mode");
+    else selectionArea?.classList.remove("results-mode");
+
+    document.querySelectorAll(".model-card-item").forEach((card) => {
+        const modelId = card.dataset.modelId;
+        const modelStats = models.find((item) => item.id === modelId);
+        const red = Number(modelStats?.red || 0);
+        const yellow = Number(modelStats?.yellow || 0);
+        const total = Number(modelStats?.total || 0);
+
+        byId(`risk-red-${modelId}`).textContent = String(red);
+        byId(`risk-yellow-${modelId}`).textContent = String(yellow);
+        byId(`risk-line-red-${modelId}`).hidden = red === 0;
+        byId(`risk-line-yellow-${modelId}`).hidden = yellow === 0;
+
+        const icon = byId(`model-icon-${modelId}`);
+        if (icon) {
+            icon.className = "bi model-card-icon";
+            if (red > 0) icon.classList.add("bi-exclamation-triangle-fill");
+            else if (yellow > 0) icon.classList.add("bi-exclamation-diamond-fill");
+            else if (total > 0) icon.classList.add("bi-shield-check");
+            else icon.classList.add("bi-shield");
+        }
+
+        card.classList.toggle("has-red", red > 0);
+        card.classList.toggle("has-yellow", red === 0 && yellow > 0);
+        card.classList.toggle("is-clean", total > 0 && red === 0 && yellow === 0);
+    });
+}
+
+async function refreshStats() {
+    if (!hasRequiredUploads()) {
+        renderModelRiskStats({});
+        return;
+    }
+    const response = await fetch("/api/stats", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderModelRiskStats(data);
+}
+
+async function resetPageSession() {
+    try {
+        const response = await fetch("/api/reset-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clear_uploads: true })
+        });
+        if (response.ok) {
+            return;
+        }
+    } catch (error) {
+        console.warn("页面初始化重置失败", error);
+    }
+    try {
+        const slotKeys = Object.keys(slots || {});
+        await Promise.all(slotKeys.map((slot) => fetch("/api/delete-upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slot })
+        }).catch(() => null)));
+    } catch (error) {
+        console.warn("页面初始化重置失败", error);
+    }
+}
+
+function shouldResetOnLoad() {
+    return true;
+}
+
+async function pollStatus() {
+    const response = await fetch("/api/status", { cache: "no-store" });
+    if (!response.ok) return false;
+    const data = await response.json();
+    const progressText = data.progress || "运行中...";
+    byId("runStatus").textContent = progressText;
+    byId("prefilterStatus").textContent = progressText;
+
+    if (!data.running) {
+        pipelineState = data.error ? "error" : "complete";
+        currentPollMode = null;
+        lastPipelineError = data.error || null;
+        if (data.error) {
+            updateRunButton();
+            return false;
+        }
+        await loadPrefilterSummary();
+        await refreshStats();
+        updateRunButton();
+        return false;
+    }
+    return true;
+}
+
+async function startPolling(mode) {
+    currentPollMode = mode;
+    pipelineState = "running";
+    lastPipelineError = null;
+    updateRunButton();
+
+    const timer = setInterval(async () => {
+        const keepRunning = await pollStatus();
+        if (!keepRunning) clearInterval(timer);
+    }, 1500);
+}
+
+function updateRunButton() {
+    const runBtn = byId("runBtn");
+    const prefilterBtn = byId("prefilterBtn");
+    const runStatus = byId("runStatus");
+    const prefilterStatus = byId("prefilterStatus");
+    const selectedCount = getSelectedModels().length;
+
+    if (prefilterBtn) prefilterBtn.disabled = pipelineState === "running";
+    if (runBtn) runBtn.disabled = pipelineState === "running" || !hasRequiredUploads() || !hasPrefilterResults(latestPrefilterSummary) || selectedCount === 0;
+
+    if (prefilterStatus) {
+        if (lastPipelineError) prefilterStatus.textContent = lastPipelineError;
+        else if (pipelineState === "running" && currentPollMode === "prefilter") prefilterStatus.textContent = "前置过滤运行中...";
+        else if (!hasRequiredUploads()) prefilterStatus.textContent = "请先上传全部必传文件，再运行前置过滤层。";
+        else if (hasPrefilterResults(latestPrefilterSummary)) prefilterStatus.textContent = "前置过滤层已完成，可以开始穿透审计。";
+        else prefilterStatus.textContent = "文件已齐备，可以运行前置过滤层。";
+    }
+
+    if (runStatus) {
+        if (lastPipelineError) runStatus.textContent = lastPipelineError;
+        else if (pipelineState === "running" && currentPollMode === "full") runStatus.textContent = "正在穿透审计中...";
+        else if (pipelineState === "running" && currentPollMode === "prefilter") runStatus.textContent = "前置过滤运行中...";
+        else if (!hasRequiredUploads()) runStatus.textContent = "请先上传必传文件。";
+        else if (!hasPrefilterResults(latestPrefilterSummary)) runStatus.textContent = "请先运行前置过滤层。";
+        else if (!selectedCount) runStatus.textContent = "请至少勾选一个模型。";
+        else runStatus.textContent = "已满足运行条件，可以开始穿透审计。";
+    }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+    renderUploadSlots();
+    byId("batchUploadBtn").addEventListener("click", () => byId("batchFileInput").click());
+    byId("batchFileInput").addEventListener("change", async (event) => {
+        await uploadBatchFiles(event.target.files);
+        event.target.value = "";
+    });
+
+    document.querySelectorAll(".slot-tile input[type='file']").forEach((input) => {
+        input.addEventListener("change", async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            await uploadSingleFile(input.dataset.slot, file);
+            input.value = "";
+        });
+    });
+
+    document.querySelectorAll(".model-check").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+            checkbox.closest(".model-card-item")?.classList.toggle("selected", checkbox.checked);
+            updateRunButton();
+        });
+    });
+
+    byId("selectAllBtn").addEventListener("click", () => {
+        document.querySelectorAll(".model-check").forEach((checkbox) => {
+            checkbox.checked = true;
+            checkbox.closest(".model-card-item")?.classList.add("selected");
+        });
+        updateRunButton();
+    });
+
+    byId("clearAllBtn").addEventListener("click", () => {
+        document.querySelectorAll(".model-check").forEach((checkbox) => {
+            checkbox.checked = false;
+            checkbox.closest(".model-card-item")?.classList.remove("selected");
+        });
+        updateRunButton();
+    });
+
+    byId("toggleUnstartedBtn").addEventListener("click", () => {
+        const btn = byId("toggleUnstartedBtn");
+        btn.dataset.expanded = btn.dataset.expanded === "true" ? "false" : "true";
+        renderProjectList("unstartedList", "unstartedEmpty", "toggleUnstartedBtn", latestPrefilterSummary?.unstarted_projects || [], "unstarted");
+    });
+
+    byId("toggleStoppedBtn").addEventListener("click", () => {
+        const btn = byId("toggleStoppedBtn");
+        btn.dataset.expanded = btn.dataset.expanded === "true" ? "false" : "true";
+        renderProjectList("stoppedList", "stoppedEmpty", "toggleStoppedBtn", latestPrefilterSummary?.stopped_projects || [], "stopped");
+    });
+
+    byId("prefilterBtn").addEventListener("click", async () => {
+        await checkUploaded();
+        await refreshRuntimeCheck();
+        await refreshStrategicScope();
+        updateRunButton();
+        if (!hasRequiredUploads()) {
+            notifyUser("请先上传全部必传文件，再运行前置过滤层");
+            return;
+        }
+        const response = await fetch("/api/run-prefilter", {
+            method: "POST",
+            headers: runIntentHeaders(),
+            body: "{}"
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            notifyUser(payload.error || "前置过滤启动失败");
+            return;
+        }
+        await startPolling("prefilter");
+    });
+
+    byId("runBtn").addEventListener("click", async () => {
+        const selectedModels = getSelectedModels();
+        await refreshStrategicScope();
+        const response = await fetch("/api/run", {
+            method: "POST",
+            headers: runIntentHeaders(),
+            body: JSON.stringify({ models: selectedModels })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            notifyUser(payload.error || "模型运行启动失败");
+            return;
+        }
+        await startPolling("full");
+    });
+
+    if (shouldResetOnLoad()) {
+        await resetPageSession();
+    }
+    await checkUploaded();
+    await refreshRuntimeCheck();
+    await refreshStrategicScope();
+    await loadPrefilterSummary();
+    await refreshStats();
+    updateRunButton();
+});
+</script>
+
+<style>
+.studio-shell { display: flex; flex-direction: column; gap: 24px; }
+.panel-card {
+    overflow: hidden;
+    border-radius: 16px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+}
+.upload-panel, .action-panel, .model-board { display: flex; flex-direction: column; }
+.action-panel > :not(.panel-head) { padding: 0 18px 18px; }
+.upload-panel > :not(.panel-head) { padding: 0 18px 18px; }
+.model-board .panel-head { padding-bottom: 10px; }
+.model-board .model-category { padding: 0 18px; }
+.model-board .run-bar { margin: 0 18px; }
+.model-board .report-cta-wrap { margin: 0 18px 16px; }
+.panel-head, .model-board-head, .run-bar, .model-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.panel-head { padding: 16px 18px; border-bottom: 1px solid rgba(237, 242, 247, 0.6); }
+.panel-head h2 { margin: 6px 0 0; color: #143a61; font-size: 18px; line-height: 1.2; font-weight: 800; }
+.eyebrow { display: inline-block; color: #2782d6; font-size: 11px; font-weight: 800; letter-spacing: 0.16em; }
+.category-bar { width: 4px; height: 18px; border-radius: 999px; background: #1f89df; flex-shrink: 0; }
+.category-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.section-desc, .batch-upload-tip, .run-status { margin: 0; color: #5e7388; font-size: 13px; }
+.strategic-scope-hint {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #e8f0ff 0%, #f4f7ff 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    color: #49627e;
+    font-size: 12px;
+    line-height: 1.55;
+    font-weight: 600;
+}
+.scope-badge {
+    flex-shrink: 0;
+    padding: 0 9px;
+    border-radius: 4px;
+    background: #1e40af;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .02em;
+    line-height: 22px;
+}
+.prefilter-summary { display: flex; flex-direction: column; gap: 16px; }
+.prefilter-metrics { display: block; }
+
+/* ── KPI卡片（匹配discrete.html风格） ── */
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kpi-card {
+    position: relative; overflow: hidden;
+    min-height: 112px; padding: 16px 18px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #e4edf7;
+    box-shadow: 0 14px 30px rgba(15,41,76,.05);
+}
+.kpi-card::after {
+    content: ""; position: absolute;
+    left: 16px; right: 16px; bottom: 0;
+    height: 3px; border-radius: 999px 999px 0 0;
+    opacity: .9;
+}
+.kpi-card > span { color: #71879d; font-size: 12px; font-weight: 800; display: block; }
+.kpi-card > span i { margin-right: 4px; }
+.kpi-card > strong {
+    display: block; margin-top: 11px;
+    color: #1d2d3e;
+    font-family: "SF Pro Display","Inter","Helvetica Neue","DIN Alternate","Microsoft YaHei UI",sans-serif;
+    font-size: 26px; line-height: 1; font-weight: 650;
+}
+.kpi-card > em { display: block; margin-top: 9px; color: #8da0b2; font-size: 11px; line-height: 1.45; font-style: normal; }
+
+/* accent bars */
+.kpi-hero::after  { background: #EF4444; }
+.kpi-blue::after  { background: #3B82F6; }
+.kpi-green::after { background: #10B981; }
+.kpi-amber::after { background: #F59E0B; }
+
+
+/* ── 清单表头动态标签（降噪） ── */
+.list-head-left { display: flex; align-items: center; gap: 10px; }
+.list-head-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.header-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    border: none;
+}
+.header-tag.tag-danger { background: #FEF2F2; color: #DC2626; }
+.header-tag.tag-warning { background: #FFF7ED; color: #EA580C; }
+
+.prefilter-list-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.prefilter-list-card {
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.32);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.5);
+    padding: 14px;
+}
+.prefilter-list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.prefilter-list-head strong { color: #1d3956; font-size: 14px; }
+.prefilter-list-head span { color: #6c849d; font-size: 12px; font-weight: 700; }
+.prefilter-empty { color: #8ea0b3; font-size: 12px; padding: 6px 0; }
+.prefilter-records { display: block; }
+.prefilter-table-wrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.35); border-radius: 12px; background: rgba(255,255,255,0.28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+.prefilter-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 620px; font-size: 12px; }
+.prefilter-table col:nth-child(1) { width: 14%; }
+.prefilter-table col:nth-child(2) { width: 22%; }
+.prefilter-table col:nth-child(3) { width: 12%; }
+.prefilter-table col:nth-child(4) { width: 14%; }
+.prefilter-table col:nth-child(5) { width: 14%; }
+.prefilter-table col:nth-child(6) { width: 24%; }
+.prefilter-table th { background: rgba(255,255,255,0.38); color: #1e3a5f; font-weight: 800; text-align: left; padding: 10px 10px; border-bottom: 1px solid rgba(226, 232, 240, 0.55); white-space: nowrap; font-size: 11px; letter-spacing: 0.02em; }
+.prefilter-table td { padding: 9px 10px; color: #334155; border-bottom: 1px solid rgba(241, 245, 249, 0.4); vertical-align: top; line-height: 1.5; background: rgba(255,255,255,0.1); }
+.prefilter-table tbody tr { transition: background 0.18s ease; }
+.prefilter-table tbody tr:hover { background: rgba(31, 137, 223, 0.04); }
+.prefilter-table tbody tr:last-child td { border-bottom: 0; }
+.prefilter-table th:nth-child(4), .prefilter-table th:nth-child(5), .prefilter-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prefilter-table th:nth-child(3) { text-align: center; }
+.prefilter-table td:nth-child(3) { text-align: center; }
+.status-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; border-radius: 999px; padding: 4px 10px; background: #eff6ff; color: #2563eb; border: 1px solid rgba(37, 99, 235, 0.12); font-weight: 700; font-size: 11px; white-space: nowrap; letter-spacing: 0.02em; }
+.link-btn { margin-top: 8px; border: 0; background: transparent; color: #1f89df; font-size: 12px; font-weight: 700; padding: 0; cursor: pointer; }
+.upload-slot-grid, .model-card-grid { display: grid; gap: 12px; }
+.upload-slot-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.slot-tile {
+    position: relative;
+    padding: 20px 18px 16px;
+    cursor: pointer;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.32);
+    border: 1px solid rgba(203, 218, 238, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease, background 0.24s ease;
+    min-height: 148px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.slot-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 38px rgba(31, 137, 223, 0.10);
+    border-color: rgba(31, 137, 223, 0.22);
+    background: rgba(255,255,255,0.52);
+}
+.slot-tile.uploaded {
+    border-color: rgba(39, 177, 91, 0.24);
+    background: linear-gradient(160deg, rgba(245, 250, 247, 0.72) 0%, rgba(255,255,255,0.48) 100%);
+}
+.slot-tile input { display: none; }
+.slot-top { display: flex; align-items: flex-start; gap: 12px; }
+.slot-icon {
+    width: 42px; height: 42px;
+    border-radius: 10px;
+    background: rgba(31, 137, 223, 0.08);
+    color: #2782d6;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+.slot-copy { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.slot-copy strong { color: #1d3956; font-size: 14px; font-weight: 800; }
+.slot-copy span { color: #6c849d; font-size: 11px; line-height: 1.5; }
+.slot-status { flex-shrink: 0; text-align: right; }
+.status-pending, .status-done { align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
+.status-pending { display: inline-flex; color: #d97706; }
+.status-done { display: none; color: #27b15b; }
+.pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; display: inline-block; animation: pulse-glow 1.6s ease-in-out infinite; }
+@keyframes pulse-glow { 0%, 100% { opacity: 0.4; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.1); } }
+.slot-fileline { color: #42627f; font-size: 11px; line-height: 1.5; word-break: break-all; display: none; }
+.slot-meta { display: flex; gap: 8px; }
+.required-tag, .optional-tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; }
+.required-tag { background: rgba(218, 77, 99, 0.08); color: #d94d63; }
+.optional-tag { background: rgba(111, 130, 151, 0.06); color: #6f8297; }
+.model-category { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.model-category + .model-category { border-top: 1px solid rgba(203, 218, 238, 0.42); padding-top: 16px; }
+.category-label { font-size: 14px; font-weight: 800; color: #1f7ec8; }
+.model-card-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.model-card-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    gap: 8px;
+    min-height: 54px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.28);
+    border: 1px solid rgba(203, 218, 238, 0.48);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+.model-card-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px rgba(31, 137, 223, 0.08);
+    border-color: rgba(31, 137, 223, 0.18);
+}
+.model-card-item.selected {
+    background: linear-gradient(160deg, rgba(245, 250, 255, 0.72) 0%, rgba(255,255,255,0.48) 100%);
+    border-color: rgba(31, 137, 223, 0.28);
+    box-shadow: 0 0 0 1px rgba(31, 137, 223, 0.14), 0 8px 22px rgba(31, 137, 223, 0.06);
+}
+.model-card-main { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.model-card-hero { display: none; align-items: center; justify-content: center; flex: 0 0 24px; }
+.model-card-icon-shell, .model-card-icon-box { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+.model-card-icon { font-size: 17px; line-height: 1; color: #5b9bd5; }
+.model-card-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.model-card-code { font-size: 13px; font-weight: 800; color: #1d3956; }
+.model-card-desc { font-size: 11px; font-weight: 600; color: #667b90; line-height: 1.35; }
+.model-card-risk { display: none; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
+.risk-line { min-width: 0; padding: 2px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; line-height: 1.1; }
+.risk-line i { font-size: 10px; }
+.risk-line strong { font-size: 11px; font-weight: 800; }
+.risk-line em { font-style: normal; font-size: 10px; font-weight: 700; margin-left: 1px; }
+.risk-line-red { background: rgba(218, 77, 99, 0.08); color: #c93245; }
+.risk-line-yellow { background: rgba(217, 119, 6, 0.07); color: #c38700; }
+.model-check { width: 18px; height: 18px; border-radius: 4px; accent-color: #1f89df; cursor: pointer; flex-shrink: 0; }
+.cta-btn, .tiny-btn { border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
+.cta-btn { background: linear-gradient(135deg, #1f89df, #3ea3ff); color: #fff; border: none; padding: 8px 20px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.cta-btn:hover { box-shadow: 0 6px 20px rgba(31, 137, 223, 0.24); }
+.tiny-btn { border: 1px solid rgba(31, 137, 223, 0.3); background: rgba(255,255,255,0.5); color: #1f89df; padding: 7px 14px; font-size: 13px; }
+.tiny-btn:hover { background: rgba(31, 137, 223, 0.06); }
+.cta-btn:disabled, .tiny-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.report-cta-wrap { margin-top: 12px; display: flex; justify-content: flex-end; }
+.report-cta-btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 14px; text-decoration: none; color: #fff; font-size: 15px; font-weight: 800; background: linear-gradient(135deg, #1f89df, #4ea8ff); box-shadow: 0 6px 20px rgba(31, 137, 223, 0.18); transition: box-shadow 0.2s ease, transform 0.2s ease; }
+.report-cta-btn:hover { box-shadow: 0 10px 28px rgba(31, 137, 223, 0.28); transform: translateY(-1px); }
+#modelSelectionArea.results-mode .model-check { display: none; }
+#modelSelectionArea.results-mode .model-card-hero { display: inline-flex; }
+#modelSelectionArea.results-mode .model-card-risk { display: inline-flex; }
+#modelSelectionArea.results-mode .model-card-item {
+    min-height: 68px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.36);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(203, 218, 238, 0.48);
+}
+#modelSelectionArea.results-mode .model-card-desc { white-space: normal; font-size: 12px; font-weight: 700; color: #1d2939; max-width: 290px; }
+#modelSelectionArea.results-mode .model-card-code { font-size: 10px; letter-spacing: 0.08em; color: #7c8ca2; }
+#modelSelectionArea.results-mode .model-card-item.has-red { background: linear-gradient(90deg, rgba(218,77,99,0.06), rgba(218,77,99,0) 46%), linear-gradient(160deg, rgba(255,244,246,0.62) 0%, rgba(255,255,255,0.42) 100%); border-color: rgba(218,77,99,0.18); }
+#modelSelectionArea.results-mode .model-card-item.has-yellow:not(.has-red) { background: linear-gradient(90deg, rgba(217,119,6,0.06), rgba(217,119,6,0) 46%), linear-gradient(160deg, rgba(255,248,232,0.52) 0%, rgba(255,255,255,0.42) 100%); border-color: rgba(217,119,6,0.18); }
+#modelSelectionArea.results-mode .model-card-item.is-clean { border-color: rgba(39,177,91,0.16); background: linear-gradient(160deg, rgba(245,250,247,0.52) 0%, rgba(255,255,255,0.42) 100%); }
+#modelSelectionArea.results-mode .model-card-item.has-red .model-card-icon { color: #d94d63; }
+#modelSelectionArea.results-mode .model-card-item.has-yellow .model-card-icon { color: #d97706; }
+#modelSelectionArea.results-mode .model-card-item.is-clean .model-card-icon { color: #27b15b; }
+@media (max-width: 992px) {
+    .model-card-grid { grid-template-columns: 1fr; }
+    .upload-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .prefilter-list-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+    .upload-slot-grid, .model-card-grid { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: 1fr; }
+    .panel-head, .model-board-head, .run-bar, .model-actions { flex-direction: column; align-items: flex-start; }
+}
+</style>
+{% endblock %}

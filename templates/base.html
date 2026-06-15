@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>{% block title %}数字化营销审计平台{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --accent: #1f89df;
+            --accent-deep: #0f6cad;
+            --accent-soft: #eaf4ff;
+            --page-bg: linear-gradient(180deg, #f4f8fc 0%, #edf3f9 100%);
+            --sidebar-w: 252px;
+            --text-main: #1f2937;
+            --text-muted: #70859a;
+            --line: #dbe7f3;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --font-latin: "SF Pro Display", "Inter", "Helvetica Neue", "DIN Alternate", "Roboto", sans-serif;
+            --font-cjk: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+            --font-ui: var(--font-latin), var(--font-cjk);
+            --font-numeric: var(--font-latin);
+            --text-size-body: 13px;
+            --text-size-meta: 12px;
+
+            /* ── v2.10 毛玻璃设计系统 ── */
+            --glass-bg: rgba(255, 255, 255, 0.44);
+            --glass-bg-deep: rgba(255, 255, 255, 0.58);
+            --glass-bg-light: rgba(255, 255, 255, 0.32);
+            --glass-border: rgba(255, 255, 255, 0.36);
+            --glass-shadow: 0 20px 45px rgba(23, 35, 52, 0.10);
+            --glass-blur: blur(24px);
+            --glass-radius: 16px;
+
+            /* 毛玻璃语义色 */
+            --glass-accent: rgba(31, 137, 223, 0.08);
+            --glass-danger: rgba(217, 77, 99, 0.06);
+            --glass-success: rgba(35, 135, 111, 0.06);
+            --glass-warning: rgba(183, 123, 18, 0.06);
+        }
+
+        /* ── v2.10 毛玻璃卡片 ── */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--glass-radius);
+            box-shadow: var(--glass-shadow);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.08) 52%, rgba(199,224,255,0.10) 100%);
+            pointer-events: none;
+        }
+        .glass-card > * {
+            position: relative;
+            z-index: 1;
+        }
+        .glass-card:hover {
+            background: var(--glass-bg-deep);
+            box-shadow: 0 24px 52px rgba(23, 35, 52, 0.12);
+            transform: translateY(-1px);
+        }
+
+        /* ── v2.10 骨架屏 ── */
+        .skeleton-glass {
+            background: rgba(232, 237, 242, 0.50);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border-radius: 14px;
+            overflow: hidden;
+            position: relative;
+            min-height: 120px;
+        }
+        .skeleton-glass::after {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.45) 50%,
+                transparent 100%);
+            animation: shimmer 1.8s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        /* ── v2.10 卡片入场动画 ── */
+        @keyframes cardReveal {
+            from { opacity: 0; transform: translateY(12px); filter: blur(2px); }
+            to   { opacity: 1; transform: translateY(0);    filter: blur(0);   }
+        }
+        .card-reveal {
+            animation: cardReveal 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+        }
+
+        /* ── v2.10 Firefox毛玻璃fallback ── */
+        @supports not (backdrop-filter: blur(1px)) {
+            .glass-card { background: rgba(255, 255, 255, 0.90); }
+            .skeleton-glass { background: rgba(232, 237, 242, 0.80); }
+        }
+
+        * { box-sizing: border-box; }
+        html, body { margin: 0; min-height: 100%; }
+
+        body {
+            font-family: var(--font-ui);
+            font-weight: 400;
+            font-size: var(--text-size-body);
+            line-height: 1.65;
+            background: var(--page-bg);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-variant-numeric: tabular-nums;
+            text-rendering: optimizeLegibility;
+        }
+
+        .sidebar,
+        .nav-item span,
+        .nav-label,
+        .sidebar-footer,
+        .page-footer,
+        .topbar .brand-copy strong,
+        .topbar .brand-copy span {
+            font-family: var(--font-cjk);
+            font-weight: 500;
+        }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 1100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 74px;
+            padding: 0 24px;
+            background: linear-gradient(90deg, #0e7ac0 0%, #1d8ede 50%, #309eea 100%);
+            color: #fff;
+            box-shadow: 0 10px 24px rgba(15, 108, 173, 0.18);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-badge {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(6px);
+            font-size: 18px;
+        }
+
+        .brand-copy strong {
+            display: block;
+            font-size: 24px;
+            line-height: 1.1;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+        }
+
+        .brand-copy span {
+            display: block;
+            margin-top: 4px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.82);
+        }
+
+        .topbar-meta {
+            font-size: var(--text-size-meta);
+            color: rgba(255, 255, 255, 0.88);
+            text-align: right;
+        }
+
+        .app-shell {
+            display: flex;
+            min-height: calc(100vh - 74px);
+        }
+
+        .sidebar {
+            width: var(--sidebar-w);
+            flex: 0 0 var(--sidebar-w);
+            background: rgba(255, 255, 255, 0.78);
+            border-right: 1px solid rgba(196, 214, 232, 0.8);
+            backdrop-filter: blur(14px);
+            padding: 22px 0 18px;
+        }
+
+        .sidebar-head {
+            padding: 0 20px 18px;
+            border-bottom: 1px solid #edf3f9;
+        }
+
+        .sidebar-head h2 {
+            margin: 0;
+            font-size: 18px;
+            color: #24507b;
+            font-weight: 800;
+        }
+
+        .sidebar-head span {
+            display: block;
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: var(--text-size-body);
+        }
+
+        .nav-group {
+            padding: 14px 12px 0;
+        }
+
+        .nav-label {
+            padding: 0 12px 4px;
+            color: #1f89df;
+            font-size: var(--text-size-meta);
+            font-weight: 700;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 3px 0;
+            padding: 10px 16px;
+            border-radius: 16px;
+            color: #4a5f74;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            border: 1px solid transparent;
+            transition: all 0.18s ease;
+        }
+
+        .nav-item i { font-size: 17px; }
+
+        .nav-item:hover {
+            color: var(--accent);
+            background: #f3f8fe;
+            border-color: #d7e8fa;
+        }
+
+        .nav-item.active {
+            color: #166fb0;
+            background: linear-gradient(90deg, #edf6ff 0%, #f7fbff 100%);
+            border-color: #b8d8f6;
+            box-shadow: inset 0 0 0 1px #cae2f8;
+        }
+
+        .sidebar-footer {
+            margin-top: 16px;
+            padding: 14px 24px 0;
+            border-top: 1px solid #edf3f9;
+            color: #8fa1b5;
+            font-size: var(--text-size-meta);
+            line-height: 1.7;
+        }
+
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            padding: 22px;
+        }
+
+        .card {
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow);
+        }
+
+        .page-footer {
+            margin-top: 24px;
+            text-align: center;
+            color: #8da0b5;
+            font-size: var(--text-size-meta);
+        }
+
+        @media (max-width: 1200px) {
+            .topbar {
+                padding: 16px 18px;
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .app-shell { flex-direction: column; }
+
+            .sidebar {
+                width: 100%;
+                flex-basis: auto;
+                border-right: none;
+                border-bottom: 1px solid rgba(196, 214, 232, 0.8);
+            }
+
+            .nav-group {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px;
+            }
+
+            .nav-label,
+            .sidebar-footer {
+                grid-column: 1 / -1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .brand-copy strong { font-size: 20px; }
+            .main-content { padding: 16px; }
+            .nav-group { grid-template-columns: 1fr; }
+        }
+    </style>
+    {% block styles %}{% endblock %}
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-badge"><i class="bi bi-grid-1x2-fill"></i></div>
+            <div class="brand-copy">
+                <strong>数字化营销审计智能分析与穿透预警模型</strong>
+                <span>融合业财多源数据，构建覆盖营销全周期的自动化合规扫描与穿透式问题溯源体系。</span>
+            </div>
+        </div>
+        <div class="topbar-meta">
+            数字化审计平台<br>
+            内部使用环境
+        </div>
+    </header>
+
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="sidebar-head">
+</div>
+
+            <div class="nav-group">
+                <div class="nav-label">数据与配置</div>
+                <a href="/" class="nav-item {% block nav_upload %}{% endblock %}">
+                    <i class="bi bi-ui-checks-grid"></i>
+                    <span>数据接入与模型选择</span>
+                </a>
+
+                <div class="nav-label">穿透与研判</div>
+                <a href="/issues" class="nav-item {% block nav_issues %}{% endblock %}">
+                    <i class="bi bi-exclamation-circle"></i>
+                    <span>风险仪表板</span>
+                </a>
+                <a href="/chains" class="nav-item {% block nav_chains %}{% endblock %}">
+                    <i class="bi bi-diagram-3"></i>
+                    <span>穿透关联图谱</span>
+                </a>
+
+                <div class="nav-label">决策分析</div>
+                <a href="/business" class="nav-item {% block nav_business %}{% endblock %}">
+                    <i class="bi bi-speedometer2"></i>
+                    <span>区域-客户-履约健康监测台</span>
+                </a>
+                <a href="/discrete" class="nav-item {% block nav_discrete %}{% endblock %}">
+                    <i class="bi bi-grid-3x3-gap"></i>
+                    <span>跨区域经营风险-收益评估</span>
+                </a>
+
+                <div class="nav-label">报告输出</div>
+                <a href="/report" class="nav-item {% block nav_report %}{% endblock %}">
+                    <i class="bi bi-file-earmark-richtext"></i>
+                    <span>综合报告</span>
+                </a>
+
+                <div class="nav-label">移动端导出</div>
+                <a href="/mobile-export" class="nav-item {% block nav_mobile %}{% endblock %}">
+                    <i class="bi bi-phone"></i>
+                    <span>手机端结果</span>
+                </a>
+                <a href="/export/qrcode" class="nav-item">
+                    <i class="bi bi-qr-code"></i>
+                    <span>二维码</span>
+                </a>
+            </div>
+
+            <div class="sidebar-footer">仅限内部使用</div>
+        </aside>
+
+        <main class="main-content">
+            {% block content %}{% endblock %}
+            <div class="page-footer">仅限内部使用</div>
+        </main>
+    </div>
+
+    <script>
+        (function () {
+            const markerKey = "auditInternalNavigation";
+
+            document.addEventListener("click", (event) => {
+                const link = event.target.closest("a[href]");
+                if (!link) return;
+                if (link.target && link.target !== "_self") return;
+                if (link.hasAttribute("download")) return;
+
+                let url;
+                try {
+                    url = new URL(link.getAttribute("href"), window.location.href);
+                } catch (error) {
+                    return;
+                }
+
+                if (url.origin === window.location.origin) {
+                    sessionStorage.setItem(markerKey, "1");
+                }
+            });
+        })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

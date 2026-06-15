@@ -1,0 +1,6 @@
+# Binary files — treat as binary to avoid diff noise
+*.xlsx binary
+*.xls binary
+*.docx binary
+*.pdf binary
+*.pkl binary

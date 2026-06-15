@@ -1,0 +1,2269 @@
+{% extends "base.html" %}
+{% block title %}区域-客户-履约健康监测台{% endblock %}
+{% block nav_business %}active{% endblock %}
+
+{% block content %}
+<div class="health-shell">
+    <section class="hero-topbar glass-sheen">
+        <div class="route-cluster">
+            <div class="route-title">行政架构视角</div>
+            <p class="route-hint">按四局行政层级切换查看范围，下方健康分、雷达图与对标表同步刷新。</p>
+            <div class="route-selectors">
+                <label class="route-pill">
+                    <span>局级</span>
+                    <select id="globalSelect">
+                        {% for item in (scope_options.global if scope_options and scope_options.global else ['四局']) %}
+                        <option value="{{ item }}">{{ item }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="route-pill">
+                    <span>直属机构</span>
+                    <div class="multi-select" id="secondaryMultiSelect">
+                        <button type="button" class="multi-select-trigger" id="secondaryTrigger" onclick="toggleMultiSelect('secondaryMultiSelect')">
+                            <span id="secondaryTriggerLabel">全部直属机构</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </button>
+                        <div class="multi-select-dropdown" id="secondaryDropdown" hidden>
+                            <div class="multi-select-actions">
+                                <button type="button" onclick="selectAllMulti('secondaryMultiSelect')">全选</button>
+                                <button type="button" onclick="clearMultiSelect('secondaryMultiSelect')">清空</button>
+                            </div>
+                            <div class="multi-select-list" id="secondaryChecklist"></div>
+                        </div>
+                    </div>
+                </label>
+                <label class="route-pill">
+                    <span>下属机构</span>
+                    <div class="multi-select" id="detailMultiSelect">
+                        <button type="button" class="multi-select-trigger" id="detailTrigger" onclick="toggleMultiSelect('detailMultiSelect')">
+                            <span id="detailTriggerLabel">全部下属机构</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </button>
+                        <div class="multi-select-dropdown" id="detailDropdown" hidden>
+                            <div class="multi-select-actions">
+                                <button type="button" onclick="selectAllMulti('detailMultiSelect')">全选</button>
+                                <button type="button" onclick="clearMultiSelect('detailMultiSelect')">清空</button>
+                            </div>
+                            <div class="multi-select-list" id="detailChecklist"></div>
+                        </div>
+                    </div>
+                </label>
+                <label class="route-pill">
+                    <span>项目城市</span>
+                    <select id="citySelect">
+                        {% for item in (scope_options.city if scope_options and scope_options.city else ['全部城市']) %}
+                        <option value="{{ item }}">{{ item }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </div>
+        <div class="timeline-cluster">
+            <div class="route-title">时间轴</div>
+            <div class="timeline-rail" id="timelineRail"></div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════
+       六模块评分规则 — 可折叠参考面板
+       ═══════════════════════════════════════════════════════════ -->
+    <section class="panel-glass rules-panel" id="scoringRulesPanel">
+        <div class="panel-head rules-head" id="rulesHead" style="cursor:pointer;">
+            <div>
+                <span class="panel-kicker">SCORING RULES REFERENCE</span>
+                <h2>📐 六模块评分规则</h2>
+            </div>
+            <button class="ghost-btn" type="button" id="rulesToggleBtn">收起 ▲</button>
+        </div>
+        <div class="rules-body" id="rulesBody">
+            <!-- 评分等级速查 -->
+            <div class="rules-grid">
+                <div class="rules-card">
+                    <div class="rules-card-title">单模块评分等级</div>
+                    <div class="rules-card-body">
+                        {% set bands = scoring_rules.score_bands or {} %}
+                        <div class="rule-row"><span class="rule-dot" style="background:#2f8f61;"></span> 强势区 ≥ {{ bands.get('强势区下限', 80) }} 分</div>
+                        <div class="rule-row"><span class="rule-dot" style="background:#c99518;"></span> 稳健区 {{ bands.get('稳健区下限', 65) }}–{{ bands.get('强势区下限', 80)-1 }} 分</div>
+                        <div class="rule-row"><span class="rule-dot" style="background:#cb5b4b;"></span> 承压区 &lt; {{ bands.get('稳健区下限', 65) }} 分</div>
+                    </div>
+                </div>
+                <div class="rules-card">
+                    <div class="rules-card-title">全局综合评级</div>
+                    <div class="rules-card-body">
+                        {% set gbands = scoring_rules.global_score_bands or {} %}
+                        <div class="rule-row"><span class="rule-dot" style="background:#2f8f61;"></span> 全局强势 ≥ {{ gbands.get('全局强势下限', 75) }} 分</div>
+                        <div class="rule-row"><span class="rule-dot" style="background:#c99518;"></span> 全局稳健 {{ gbands.get('全局稳健下限', 60) }}–{{ gbands.get('全局强势下限', 75)-1 }} 分</div>
+                        <div class="rule-row"><span class="rule-dot" style="background:#cb5b4b;"></span> 全局承压 &lt; {{ gbands.get('全局稳健下限', 60) }} 分</div>
+                        <div class="rule-note">全局阈值适度放宽，鼓励均衡发展（木桶效应下单一短板即可拉低全局分）</div>
+                    </div>
+                </div>
+                <div class="rules-card">
+                    <div class="rules-card-title">数据置信度</div>
+                    <div class="rules-card-body">
+                        {% set cl = scoring_rules.confidence_levels or {} %}
+                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1f89df;"></span> 高 ≥ {{ cl.get('高置信度下限', 80) }} 分（实心圆）</div>
+                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1f89df;opacity:0.7;border:2px solid #f59e0b;"></span> 中 {{ cl.get('中置信度下限', 50) }}–{{ cl.get('高置信度下限', 80)-1 }} 分（黄边）</div>
+                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;background:#1f89df;opacity:0.45;border:2px dashed #d94d63;"></span> 低 &lt; {{ cl.get('中置信度下限', 50) }} 分（虚线菱形）</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 六模块权重 -->
+            <div class="rules-section-title">六模块权重分配</div>
+            <div class="rules-grid rules-grid-6">
+                {% set weights = scoring_rules.module_weights or {} %}
+                {% set mod_keys = ['模块一_区域布局', '模块二_客户稳定', '模块三_合同质量', '模块四_履约盈利', '模块五_资金效率', '模块六_数据质量'] %}
+                {% set mod_display = ['模块一：区域布局', '模块二：客户稳定', '模块三：合同质量', '模块四：履约盈利', '模块五：资金效率', '模块六：数据质量'] %}
+                {% for mk in mod_keys %}
+                <div class="rules-card rules-mod-card">
+                    <div class="rules-card-title">{{ mod_display[loop.index0] }}</div>
+                    <div class="rules-card-body">
+                        <strong class="rules-weight">{{ '%.0f'|format((weights.get(mk, 0) * 100)|round) }}%</strong>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- 各模块子指标权重 -->
+            <div class="rules-section-title">子指标权重明细</div>
+            <div class="rules-grid rules-grid-3" id="subIndicatorGrid">
+                {% set mod_keys = ['module_1','module_2','module_3','module_4','module_5','module_6'] %}
+                {% set mod_titles = ['模块一：区域布局健康度','模块二：客户资源稳定性','模块三：合同质量与风险集中度','模块四：履约盈利健康度','模块五：资金效率与安全性','模块六：数据质量与流程规范'] %}
+                {% for mk in mod_keys %}
+                {% set sub = scoring_rules.get(mk, {}) %}
+                <div class="rules-card">
+                    <div class="rules-card-title">{{ mod_titles[loop.index0] }}</div>
+                    <div class="rules-card-body">
+                        {% if sub %}
+                        {% for ind_name, ind_weight in sub.items() %}
+                        <div class="rule-row rule-indicator"><span>{{ ind_name }}</span><strong>{{ '%.0f'|format((ind_weight * 100)|round) }}%</strong></div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="rule-row">暂无子指标配置</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- 评分引擎四大防线 -->
+            {% set engine = scoring_rules.scoring_engine or {} %}
+            {% if engine %}
+            <div class="rules-section-title">⚙️ 底层评分引擎 · {{ engine.get('version', '') }}</div>
+            <div class="rules-grid rules-grid-4">
+                {% for defence_name, defence_desc in (engine.get('defences') or {}).items() %}
+                <div class="rules-card rules-engine-card">
+                    <div class="rules-card-title">{{ defence_name.split('_', 1)[1] if '_' in defence_name else defence_name }}</div>
+                    <div class="rules-card-body">
+                        <p class="rule-desc">{{ defence_desc }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="health-hero">
+        <div class="panel-head hero-panel-head">
+            <div>
+                <span class="panel-kicker">CORE DIAGNOSIS & MULTI-DIMENSION PORTRAIT</span>
+                <h2>核心诊断与多维画像</h2>
+            </div>
+            <span class="panel-note" id="scopeChip">当前视角 · 四局</span>
+        </div>
+
+        <div class="hero-core-grid">
+            <article class="score-panel">
+                <div class="score-caption">综合健康分</div>
+                <div class="score-main">
+                    <span class="score-value" id="healthScore">0.0</span>
+                    <span class="score-unit">分</span>
+                </div>
+                <div class="score-tone" id="healthTone">等待加载</div>
+                <p class="score-summary" id="healthSummary">六模块经营健康画像将随着行政架构视角与时间轴联动刷新。</p>
+
+                <div class="score-chip-row">
+                    <div class="score-chip" id="timelineChip">当前周期</div>
+                </div>
+
+                <div class="score-meta-grid">
+                    <article class="meta-card">
+                        <span>强势模块</span>
+                        <strong id="strongModuleCount">0</strong>
+                        <em>得分 ≥ 80</em>
+                    </article>
+                    <article class="meta-card">
+                        <span>承压模块</span>
+                        <strong id="pressureModuleCount">0</strong>
+                        <em>得分 &lt; 65</em>
+                    </article>
+                    <article class="meta-card">
+                        <span>项目总量</span>
+                        <strong id="projectCount">0</strong>
+                        <em>覆盖行政范围</em>
+                    </article>
+                    <article class="meta-card">
+                        <span>合同规模</span>
+                        <strong id="contractTotal">0.00</strong>
+                        <em>亿元</em>
+                    </article>
+                </div>
+            </article>
+
+            <article class="radar-panel">
+                <div class="panel-head inner-panel-head">
+                    <div>
+                        <span class="panel-kicker" id="chartPanelKicker">BALANCE & QUARTER TREND</span>
+                        <h2 id="chartPanelTitle">六维均衡雷达图 / 季度折线</h2>
+                    </div>
+                    <div class="chart-switch" id="chartSwitch">
+                        <button type="button" class="active" data-chart="radar">雷达图</button>
+                        <button type="button" data-chart="line">季度折线</button>
+                    </div>
+                </div>
+                <div class="radar-wrap">
+                    <canvas id="moduleRadarCanvas"></canvas>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section class="panel-glass module-panel">
+        <div class="panel-head">
+            <div>
+                <span class="panel-kicker">MODULE DETAIL MATRIX</span>
+                <h2>六大模块指标矩阵</h2>
+            </div>
+                <span class="panel-note" id="moduleHint">固定展开视图，直接查看指标得分与业务值</span>
+        </div>
+        <div class="module-matrix-grid" id="modulesGrid"></div>
+    </section>
+
+    <section class="panel-glass benchmark-panel">
+        <div class="panel-head benchmark-head">
+            <div>
+                <span class="panel-kicker">MULTI-LEVEL BENCHMARK</span>
+                <h2>组织对标视图</h2>
+            </div>
+            <div class="tab-switch" id="tabSwitch">
+                <button type="button" class="active" data-tab="subsidiaries">分公司</button>
+                <button type="button" data-tab="cities">城市</button>
+                <button type="button" data-tab="projects">重点项目</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="ops-table" id="benchmarkTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<style>
+:root {
+    --health-bg: linear-gradient(180deg, #f6faff 0%, #edf5ff 48%, #eaf2fd 100%);
+    --glass-deep: rgba(255, 255, 255, 0.42);
+    --glass-mid: rgba(255, 255, 255, 0.58);
+    --glass-line: rgba(255, 255, 255, 0.38);
+    --ink-strong: #1e2c36;
+    --ink-soft: #5a6b76;
+    --accent-green: #2f8f61;
+    --accent-yellow: #c99518;
+    --accent-red: #cb5b4b;
+    --shadow-soft: 0 20px 45px rgba(23, 35, 52, 0.10);
+}
+
+.content-shell,
+.health-shell {
+    background: transparent;
+}
+
+.health-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    color: var(--ink-strong);
+}
+
+.panel-kicker {
+    display: inline-block;
+    color: #2782d6;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.rule-card {
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #e8f0ff 0%, #f4f7ff 100%);
+    border: 1px solid #c9d9ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+    overflow: hidden;
+}
+
+.rule-clean {
+    display: flex;
+    align-items: center;
+    gap: 10px 14px;
+    flex-wrap: wrap;
+    color: #49627e;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.rule-badge {
+    flex: 0 0 auto;
+    padding: 0 9px;
+    border-radius: 4px;
+    background: #2f80d7;
+    color: #fff !important;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .02em;
+}
+
+.health-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 22px;
+    border-radius: 18px;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.88), transparent 28%),
+        radial-gradient(circle at 80% 25%, rgba(110, 170, 255, 0.22), transparent 24%),
+        radial-gradient(circle at 62% 78%, rgba(173, 211, 255, 0.18), transparent 26%),
+        var(--health-bg);
+    box-shadow: var(--shadow-soft);
+}
+
+.health-hero::before,
+.health-hero::after {
+    content: "";
+    position: absolute;
+    border-radius: 12px;
+    filter: blur(28px);
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+.health-hero::before {
+    top: -38px;
+    right: 8%;
+    width: 220px;
+    height: 220px;
+    background: rgba(102, 166, 255, 0.22);
+}
+
+.health-hero::after {
+    left: -40px;
+    bottom: -50px;
+    width: 240px;
+    height: 240px;
+    background: rgba(186, 220, 255, 0.18);
+}
+
+.glass-sheen,
+.panel-glass,
+.route-pill,
+.meta-card,
+.module-capsule,
+.timeline-node,
+.score-chip {
+    background: var(--glass-deep);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-line);
+    box-shadow: 0 14px 36px rgba(20, 33, 49, 0.08);
+}
+
+.hero-topbar {
+    position: sticky;
+    top: 88px;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+    gap: 18px;
+    padding: 16px 18px;
+    border-radius: 14px;
+}
+
+.route-title {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #567083;
+    font-weight: 800;
+}
+
+.route-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #6d8294;
+}
+
+.route-cluster,
+.timeline-cluster {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.route-selectors {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.route-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+}
+
+.route-pill span {
+    font-size: 12px;
+    color: #607786;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.route-pill select {
+    min-width: 120px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    color: var(--ink-strong);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.route-arrow {
+    color: #91a4b0;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* ── 多选下拉 ── */
+.multi-select { position: relative; }
+.multi-select-trigger {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: none; background: transparent;
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    color: var(--ink-strong);
+    padding: 0; cursor: pointer; outline: none;
+    min-width: 100px; max-width: 160px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.multi-select-trigger i { font-size: 10px; color: #667b90; }
+.multi-select-dropdown {
+    position: absolute; top: 100%; left: 0; z-index: 20;
+    min-width: 200px; max-height: 260px;
+    margin-top: 4px; padding: 8px;
+    border-radius: 10px; border: 1px solid #dce8f6;
+    background: #fff; box-shadow: 0 12px 32px rgba(15,23,42,.12);
+    overflow-y: auto;
+    font-family: inherit; font-size: 13px;
+}
+.multi-select-actions {
+    display: flex; gap: 6px; padding-bottom: 6px;
+    border-bottom: 1px solid #edf2f7; margin-bottom: 4px;
+}
+.multi-select-actions button {
+    border: none; background: #f1f6fc; color: #456177;
+    font-family: inherit; font-size: 12px; font-weight: 700; padding: 3px 8px;
+    border-radius: 4px; cursor: pointer;
+}
+.multi-select-actions button:hover { background: #dce8f6; }
+.multi-select-list { display: flex; flex-direction: column; gap: 2px; }
+.multi-select-option {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px;
+    font-family: inherit; font-size: 13px; color: #27415d; cursor: pointer;
+}
+.multi-select-option:hover { background: #f5f8fc; }
+.multi-select-option input { accent-color: #1f89df; }
+
+.timeline-rail {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.timeline-node {
+    position: relative;
+    min-width: 92px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+}
+
+.timeline-node:hover {
+    transform: translateY(-2px);
+}
+
+.timeline-node.active {
+    background: rgba(32, 49, 60, 0.84);
+    color: #f6fbff;
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.timeline-node strong,
+.timeline-node span {
+    display: block;
+}
+
+.timeline-node strong {
+    font-size: 13px;
+}
+
+.timeline-node span {
+    margin-top: 4px;
+    font-size: 11px;
+    opacity: 0.78;
+}
+
+.hero-panel-head {
+    padding: 16px 20px;
+}
+
+.hero-core-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.35fr) minmax(0, 0.65fr);
+    gap: 18px;
+    padding: 0 20px;
+}
+
+.score-panel,
+.radar-panel {
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.24);
+    border: 1px solid rgba(255,255,255,0.26);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+}
+
+.score-panel::before,
+.radar-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.06) 55%, rgba(186,220,255,0.10) 100%);
+    pointer-events: none;
+}
+
+.score-panel > *,
+.radar-panel > * {
+    position: relative;
+    z-index: 1;
+}
+
+.score-panel {
+    padding: 22px 20px 18px;
+}
+
+.score-caption {
+    font-size: 14px;
+    color: #667d89;
+    font-weight: 700;
+}
+
+.score-main {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.score-value {
+    font-family: var(--font-numeric);
+    font-size: clamp(72px, 9vw, 122px);
+    line-height: 0.9;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: #22323b;
+    transition: color 0.35s ease;
+}
+
+.score-unit {
+    padding-bottom: 14px;
+    font-size: 20px;
+    color: #74848d;
+    font-weight: 700;
+}
+
+.score-tone {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    margin-top: 10px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.52);
+    color: #334a57;
+}
+
+.score-summary {
+    max-width: 700px;
+    margin: 16px 0 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+.score-chip {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #2b414f;
+}
+
+.score-chip.muted {
+    color: #637985;
+}
+
+.score-chip-row {
+    margin-top: 14px;
+}
+
+.score-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.meta-card {
+    padding: 16px;
+    border-radius: 14px;
+}
+
+.meta-card span,
+.meta-card em {
+    display: block;
+}
+
+.meta-card span {
+    color: #697c88;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.meta-card strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 30px;
+    line-height: 1;
+    color: #1f313b;
+    font-family: var(--font-numeric);
+}
+
+.meta-card em {
+    margin-top: 8px;
+    color: #8a9aa5;
+    font-size: 11px;
+    font-style: normal;
+}
+
+.panel-glass {
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #edf2f7;
+}
+
+.panel-head h2 {
+    margin: 6px 0 0;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 800;
+    color: #143a61;
+}
+
+.panel-note {
+    color: #7d919d;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.inner-panel-head {
+    padding: 18px 18px 0;
+    border-bottom: 0;
+}
+
+.radar-wrap {
+    height: 500px;
+    padding: 16px 20px 18px;
+}
+
+#moduleRadarCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.module-panel {
+    padding-bottom: 18px;
+}
+
+.module-matrix-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 18px 20px 0;
+}
+
+.module-capsule {
+    position: relative;
+    padding: 18px;
+    border-radius: 16px;
+    cursor: default;
+    transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+}
+
+.module-capsule:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 18px 42px rgba(20, 33, 49, 0.12);
+}
+
+.capsule-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.capsule-index {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #748791;
+    font-weight: 800;
+}
+
+.capsule-title {
+    margin-top: 6px;
+    font-size: 19px;
+    color: #21323d;
+    font-weight: 800;
+    line-height: 1.28;
+}
+
+.capsule-score {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.capsule-score strong {
+    font-size: 34px;
+    line-height: 1;
+    font-family: var(--font-numeric);
+}
+
+.capsule-tone {
+    padding: 5px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.capsule-summary {
+    margin-top: 12px;
+    color: #6b7d88;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.metric-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.metric-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 80px;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.54);
+    transition: background 0.2s ease, color 0.2s ease;
+    cursor: default;
+}
+.metric-row:hover {
+    background: rgba(31, 137, 223, 0.07);
+}
+.metric-row:hover .metric-label {
+    color: #1f7fca;
+}
+.metric-row:hover .metric-score {
+    color: #1f7fca;
+}
+
+.metric-label {
+    font-size: 13px;
+    color: #35505f;
+    font-weight: 700;
+}
+
+.metric-main {
+    display: grid;
+    gap: 6px;
+}
+
+.metric-formula {
+    font-size: 10px;
+    line-height: 1.45;
+    color: rgba(115, 135, 146, 0.82);
+    font-weight: 500;
+}
+
+.metric-score {
+    text-align: right;
+    font-size: 13px;
+    font-weight: 800;
+    color: #263943;
+}
+
+.benchmark-panel {
+    padding-bottom: 14px;
+}
+
+.benchmark-head {
+    align-items: center;
+    padding-bottom: 14px;
+}
+
+.tab-switch {
+    display: inline-flex;
+    gap: 8px;
+    padding: 5px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.48);
+    border: 1px solid rgba(255, 255, 255, 0.34);
+}
+
+.tab-switch button {
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 16px;
+    background: transparent;
+    color: #5f7481;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.tab-switch button.active {
+    background: rgba(34, 49, 60, 0.84);
+    color: #f8fbff;
+}
+
+.chart-switch {
+    display: inline-flex;
+    gap: 8px;
+    padding: 5px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.48);
+    border: 1px solid rgba(255, 255, 255, 0.34);
+}
+
+.chart-switch button {
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 16px;
+    background: transparent;
+    color: #5f7481;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.chart-switch button.active {
+    background: rgba(34, 49, 60, 0.84);
+    color: #f8fbff;
+}
+
+.table-wrap {
+    overflow-x: hidden;
+    padding: 16px 18px 0;
+}
+
+.ops-table {
+    width: 100%;
+    min-width: 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 12px;
+}
+
+.ops-table th {
+    padding: 12px;
+    text-align: center;
+    color: #516674;
+    border-bottom: 1px solid rgba(116, 134, 146, 0.18);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+}
+
+.ops-table td {
+    padding: 12px;
+    text-align: center;
+    border-bottom: 1px solid rgba(116, 134, 146, 0.10);
+    color: #2e414d;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
+}
+
+.ops-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.36);
+}
+
+.ops-table .center { text-align: center; }
+.ops-table .num { text-align: center; font-variant-numeric: tabular-nums; }
+.ops-table .text-cell { text-align: left; }
+.ops-table .diagnosis-cell { text-align: left; color: #6a7d88; line-height: 1.65; }
+.ops-table .money-cell { text-align: center; font-variant-numeric: tabular-nums; }
+
+.score-pill {
+    display: inline-flex;
+    min-width: 58px;
+    justify-content: center;
+    padding: 5px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.72);
+    font-weight: 800;
+}
+
+.empty-cell {
+    padding: 32px 14px;
+    text-align: center;
+    color: #81939f;
+}
+
+@media (max-width: 1280px) {
+    .hero-topbar,
+    .hero-core-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 920px) {
+    .module-matrix-grid,
+    .score-meta-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .route-selectors {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .route-arrow {
+        display: none;
+    }
+
+    .route-pill {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+@media (max-width: 720px) {
+
+    .health-hero,
+    .panel-glass {
+        border-radius: 14px;
+    }
+
+    .metric-row {
+        grid-template-columns: 1fr;
+    }
+
+    .metric-score {
+        text-align: left;
+    }
+
+    .benchmark-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   评分规则参考面板
+   ═══════════════════════════════════════════════════════════ */
+.rules-panel {
+    border-radius: 16px;
+    background: rgba(255,255,255,0.38);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(211, 227, 249, 0.55);
+    box-shadow: 0 16px 40px rgba(19, 41, 68, 0.07);
+    overflow: hidden;
+}
+.rules-head {
+    border-bottom: 1px solid #eef2f7;
+    user-select: none;
+}
+.rules-head h2 { font-size: 18px; }
+.rules-toggle-btn {
+    border: 1px solid #d3e0ef;
+    border-radius: 8px;
+    background: #fff;
+    color: #2f80d7;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.18s ease;
+}
+.rules-toggle-btn:hover { background: #f0f6ff; }
+.rules-body {
+    padding: 18px 22px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.rules-grid {
+    display: grid;
+    gap: 12px;
+}
+.rules-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rules-grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.rules-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rules-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.rules-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #e8eff8;
+    box-shadow: 0 6px 18px rgba(15, 41, 76, 0.03);
+}
+.rules-card-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #2f80d7;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+}
+.rules-card-body { font-size: 12px; color: #445468; line-height: 1.75; }
+.rules-section-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #1d2d3e;
+    letter-spacing: 0.03em;
+    padding-top: 4px;
+}
+.rule-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+.rule-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.rule-note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f7fbff;
+    color: #71879d;
+    font-size: 11px;
+    line-height: 1.6;
+    border: 1px solid #e5eef8;
+}
+.rule-indicator {
+    justify-content: space-between;
+}
+.rule-indicator span { color: #567083; }
+.rule-indicator strong { color: #1d2d3e; font-size: 13px; }
+.rule-desc {
+    margin: 0;
+    font-size: 11px;
+    color: #607786;
+    line-height: 1.7;
+}
+.rules-weight {
+    font-size: 22px;
+    font-weight: 750;
+    color: #1d2d3e;
+    font-family: "SF Pro Display","Inter","Helvetica Neue",sans-serif;
+}
+.rules-mod-card { text-align: center; }
+.rules-mod-card .rules-card-body { padding-top: 4px; }
+.rules-engine-card { border-left: 3px solid #2f80d7; }
+
+@media (max-width: 1100px) {
+    .rules-grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .rules-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+    .rules-grid,
+    .rules-grid-6,
+    .rules-grid-3,
+    .rules-grid-4 { grid-template-columns: 1fr; }
+    .rules-body { padding: 12px 14px 16px; }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PAGE_DATA = {{ business_stats|tojson|safe }};
+const MODULE_LABELS = [
+    "区域布局",
+    "客户资源",
+    "合同质量",
+    "履约盈利",
+    "资金效率",
+    "数据质量",
+];
+const MODULE_KEYS = [
+    "模块一_区域布局",
+    "模块二_客户稳定",
+    "模块三_合同质量",
+    "模块四_履约盈利",
+    "模块五_资金效率",
+    "模块六_数据质量",
+];
+const MODULE_DETAIL_LABELS = [
+    "模块一：区域布局健康度",
+    "模块二：客户资源稳定性",
+    "模块三：合同质量与风险集中度",
+    "模块四：履约盈利健康度",
+    "模块五：资金效率与安全性",
+    "模块六：数据质量与流程规范",
+];
+const MODULE_METRIC_NAMES = [
+    ["区域渗透率", "跨区域经营指数", "深耕区域集中度", "区域合同额强度", "业务结构偏离度", "EPC转型进度"],
+    ["客户稳定性指数", "客户产出波动率", "客户集中度风险", "中标转化率", "新客户质量指数", "战略客户产出比"],
+    ["风险项目占比", "风险合同额集中度", "付款条件优良率", "合同条款不利度", "三证合规率"],
+    ["产值转化率", "签约履约偏差率", "盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
+    ["资金占用率", "保证金周转天数", "逾期回收率", "预收款缺口率", "负流项目占比"],
+    ["数据完整率", "流程合规率", "中标签约偏差率", "测算规律性指数", "签约延迟率"],
+];
+const METRIC_FORMULAS = {
+    "区域渗透率": "落地城市数 ÷ 授权深耕城市数",
+    "跨区域经营指数": "非常规区域合同额 ÷ 总合同额",
+    "深耕区域集中度": "深耕区域合同额 ÷ 总合同额",
+    "区域合同额强度": "总签约额 ÷ 落地城市数",
+    "业务结构偏离度": "实际业务占比与155目标占比的偏离加权值",
+    "EPC转型进度": "EPC项目合同额 ÷ 总合同额",
+    "客户稳定性指数": "连续合作客户数 ÷ 客户总数",
+    "客户产出波动率": "客户合同额标准差 ÷ 客户合同额均值",
+    "客户集中度风险": "前5大客户合同额 ÷ 总合同额",
+    "中标转化率": "已签约中标项目数 ÷ 中标项目总数",
+    "新客户质量指数": "优质新客户数 ÷ 新客户总数",
+    "战略客户产出比": "战略及优质客户合同额 ÷ 总合同额",
+    "风险项目占比": "高风险项目数 ÷ 总项目数",
+    "风险合同额集中度": "风险项目合同额 ÷ 总合同额",
+    "付款条件优良率": "付款条件合规项目数 ÷ 总项目数",
+    "合同条款不利度": "不利条款项目数 ÷ 总项目数",
+    "三证合规率": "三证齐备项目数 ÷ 总项目数",
+    "产值转化率": "实际完成产值 ÷ 签约额",
+    "签约履约偏差率": "签约满12个月且产值转化不足项目数 ÷ 总项目数",
+    "盈利健康度": "A值达标项目数 ÷ 总项目数",
+    "停工退场率": "停工或退场项目数 ÷ 总项目数",
+    "效益偏差率": "实际利润偏离目标项目数 ÷ 总项目数",
+    "在施项目活跃度": "正常在施项目数 ÷ 在施项目总数",
+    "资金占用率": "资金占用额 ÷ 签约额",
+    "保证金周转天数": "保证金回收平均天数",
+    "逾期回收率": "逾期回收额 ÷ 逾期应收总额",
+    "预收款缺口率": "预收款缺口额 ÷ 预收款应收额",
+    "负流项目占比": "现金净流出项目数 ÷ 总项目数",
+    "数据完整率": "关键字段非空数 ÷ 应填字段总数",
+    "流程合规率": "流程节点合规项目数 ÷ 总项目数",
+    "中标签约偏差率": "中标后超阈值未签约项目数 ÷ 中标项目总数",
+    "测算规律性指数": "测算偏差在阈值内项目数 ÷ 总项目数",
+    "签约延迟率": "超计划签约项目数 ÷ 总项目数",
+};
+
+let BIZ_CONFIG = {
+    score_bands: {"强势区下限": 80, "稳健区下限": 65},
+    global_score_bands: {"全局强势下限": 75, "全局稳健下限": 60},
+};
+
+let moduleDetails = {};
+let benchmarkData = {subsidiaries: [], cities: [], projects: []};
+let currentBusinessData = PAGE_DATA;
+const SCOPE_ALL_DIRECT = "全部直属机构";
+const SCOPE_ALL_SUB = "全部下属机构";
+const SCOPE_ALL_CITY = "全部城市";
+
+let currentScope = {global: "四局", secondary: SCOPE_ALL_DIRECT, detail: SCOPE_ALL_SUB, city: SCOPE_ALL_CITY};
+let currentTimeline = "实时";
+let currentTab = "subsidiaries";
+let currentChart = "radar";
+let scopeOptions = {{ scope_options|tojson|safe }} || buildScopeOptions();
+function num(value, fallback = 0){
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function fmt(value, digits = 1){
+    return num(value).toFixed(digits);
+}
+
+function clamp(value, min, max){
+    return Math.max(min, Math.min(max, value));
+}
+
+function getModuleTone(score){
+    const strong = num(BIZ_CONFIG.score_bands?.["强势区下限"], 80);
+    const steady = num(BIZ_CONFIG.score_bands?.["稳健区下限"], 65);
+    if(score >= strong){
+        return {label: "强势", color: "#2f8f61", soft: "rgba(47,143,97,0.14)"};
+    }
+    if(score >= steady){
+        return {label: "稳健", color: "#c99518", soft: "rgba(201,149,24,0.14)"};
+    }
+    return {label: "承压", color: "#cb5b4b", soft: "rgba(203,91,75,0.14)"};
+}
+
+function getGlobalTone(score){
+    const strong = num(BIZ_CONFIG.global_score_bands?.["全局强势下限"], 75);
+    const steady = num(BIZ_CONFIG.global_score_bands?.["全局稳健下限"], 60);
+    if(score >= strong){
+        return {label: "经营健康，处于强势区", color: "#2f8f61"};
+    }
+    if(score >= steady){
+        return {label: "经营稳健，需持续优化", color: "#c99518"};
+    }
+    return {label: "经营承压，建议专项诊断", color: "#cb5b4b"};
+}
+
+function mixScoreColor(score){
+    const s = clamp(num(score), 0, 100);
+    if(s >= 80){
+        return `rgb(${Math.round(47 - (s - 80) * 0.4)}, ${Math.round(143 + (s - 80) * 0.2)}, ${Math.round(97 + (s - 80) * 0.1)})`;
+    }
+    if(s >= 65){
+        const ratio = (s - 65) / 15;
+        const r = 203 + (47 - 203) * ratio;
+        const g = 91 + (143 - 91) * ratio;
+        const b = 75 + (97 - 75) * ratio;
+        return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+    }
+    const ratio = s / 65;
+    const r = 203 + (201 - 203) * ratio;
+    const g = 91 + (149 - 91) * ratio;
+    const b = 75 + (24 - 75) * ratio;
+    return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+}
+
+function timelineOptions(){
+    return [
+        {key: "Q1", title: "一季度", subtitle: "Q1"},
+        {key: "Q2", title: "二季度", subtitle: "Q2"},
+        {key: "Q3", title: "三季度", subtitle: "Q3"},
+        {key: "Q4", title: "四季度", subtitle: "Q4"},
+        {key: "实时", title: "Live", subtitle: "实时"},
+    ];
+}
+
+function buildScopeOptions(){
+    return {
+        global: ["四局"],
+        secondary: [SCOPE_ALL_DIRECT],
+        detail: [SCOPE_ALL_SUB],
+        city: [SCOPE_ALL_CITY],
+        detail_by_secondary: {},
+        city_by_secondary: {},
+        city_by_detail: {},
+    };
+}
+
+function formatScopeChip(){
+    const parts = [currentScope.global || "四局"];
+    if(selectedSecondaries && selectedSecondaries.length && !selectedSecondaries.includes(SCOPE_ALL_DIRECT)){
+        parts.push(selectedSecondaries.length === 1 ? selectedSecondaries[0] : `${selectedSecondaries.length}个直属机构`);
+    }
+    if(selectedDetails && selectedDetails.length && !selectedDetails.includes(SCOPE_ALL_SUB)){
+        parts.push(selectedDetails.length === 1 ? selectedDetails[0] : `${selectedDetails.length}个机构`);
+    }
+    if(currentScope.city && currentScope.city !== SCOPE_ALL_CITY){
+        parts.push(currentScope.city);
+    }
+    if(parts.length === 1){
+        return `当前视角 · ${parts[0]}`;
+    }
+    return `当前视角 · ${parts.join(" → ")}`;
+}
+
+function syncScopeState(){
+    const secondaryList = Array.isArray(scopeOptions.secondary) ? scopeOptions.secondary : [SCOPE_ALL_DIRECT];
+    if(!selectedSecondaries.length){
+        selectedSecondaries = [SCOPE_ALL_DIRECT];
+    }
+    selectedSecondaries = selectedSecondaries.filter(item => secondaryList.includes(item));
+    if(!selectedSecondaries.length){
+        selectedSecondaries = [SCOPE_ALL_DIRECT];
+    }
+    currentScope.secondary = selectedSecondaries.includes(SCOPE_ALL_DIRECT) ? SCOPE_ALL_DIRECT : selectedSecondaries.join(",");
+
+    let detailList = Array.isArray(scopeOptions.detail) ? [...scopeOptions.detail] : [SCOPE_ALL_SUB];
+    if(!selectedSecondaries.includes(SCOPE_ALL_DIRECT)){
+        const mergedDetails = new Set();
+        selectedSecondaries.forEach(name => {
+            (scopeOptions.detail_by_secondary?.[name] || []).forEach(item => mergedDetails.add(item));
+        });
+        detailList = [SCOPE_ALL_SUB, ...Array.from(mergedDetails).sort()];
+    }
+    if(!selectedDetails.length){
+        selectedDetails = [SCOPE_ALL_SUB];
+    }
+    selectedDetails = selectedDetails.filter(item => detailList.includes(item));
+    if(!selectedDetails.length){
+        selectedDetails = [SCOPE_ALL_SUB];
+    }
+    currentScope.detail = selectedDetails.includes(SCOPE_ALL_SUB) ? SCOPE_ALL_SUB : selectedDetails.join(",");
+
+    let cityList = Array.isArray(scopeOptions.city) ? [...scopeOptions.city] : [SCOPE_ALL_CITY];
+    if(!selectedDetails.includes(SCOPE_ALL_SUB)){
+        const mergedDetailCities = new Set();
+        selectedDetails.forEach(name => {
+            (scopeOptions.city_by_detail?.[name] || []).forEach(item => mergedDetailCities.add(item));
+        });
+        cityList = [SCOPE_ALL_CITY, ...Array.from(mergedDetailCities).sort()];
+    }else if(!selectedSecondaries.includes(SCOPE_ALL_DIRECT)){
+        const mergedCities = new Set();
+        selectedSecondaries.forEach(name => {
+            (scopeOptions.city_by_secondary?.[name] || []).forEach(item => mergedCities.add(item));
+        });
+        cityList = [SCOPE_ALL_CITY, ...Array.from(mergedCities).sort()];
+    }
+    if(!cityList.includes(currentScope.city)){
+        currentScope.city = cityList[0] || SCOPE_ALL_CITY;
+    }
+
+    return {detailList, cityList};
+}
+
+function renderSelectors(){
+    const {detailList, cityList} = syncScopeState();
+    renderSelect("globalSelect", scopeOptions.global || ["四局"], currentScope.global);
+    renderSecondaryChecklist(scopeOptions.secondary || [SCOPE_ALL_DIRECT]);
+    renderDetailChecklist(detailList);
+    renderSelect("citySelect", cityList, currentScope.city);
+}
+
+function renderSelect(id, options, value){
+    const el = document.getElementById(id);
+    el.innerHTML = options.map(item => `<option value="${item}">${item}</option>`).join("");
+    el.value = options.includes(value) ? value : options[0];
+}
+
+let selectedSecondaries = [];
+let selectedDetails = [];
+let secondaryVisualOverride = null;
+let detailVisualOverride = null;
+
+function renderSecondaryChecklist(secondaryList){
+    const list = document.getElementById("secondaryChecklist");
+    if(!list) return;
+    const options = (secondaryList || [SCOPE_ALL_DIRECT]).filter((v,i,a) => a.indexOf(v) === i);
+    const realOptions = options.filter(v => v !== SCOPE_ALL_DIRECT);
+    const allRealSelected = realOptions.length > 0 && realOptions.every(v => selectedSecondaries.includes(v));
+    if(!selectedSecondaries.length) selectedSecondaries = [SCOPE_ALL_DIRECT];
+    list.innerHTML = options.map(v => `
+        <label class="multi-select-option">
+            <input type="checkbox" value="${v}" ${secondaryVisualOverride === "clear" ? "" : (secondaryVisualOverride === "all" || selectedSecondaries.includes(v) || (v === SCOPE_ALL_DIRECT && allRealSelected)) ? "checked" : ""}
+                   onchange="onSecondaryCheckChange(event)">
+            <span>${v}</span>
+        </label>
+    `).join("");
+    updateSecondaryTrigger();
+}
+
+async function onSecondaryCheckChange(event){
+    secondaryVisualOverride = null;
+    detailVisualOverride = null;
+    const options = (scopeOptions.secondary || [SCOPE_ALL_DIRECT]).filter((v,i,a) => a.indexOf(v) === i);
+    const realOptions = options.filter(v => v !== SCOPE_ALL_DIRECT);
+    if(event?.target?.value === SCOPE_ALL_DIRECT){
+        if(event.target.checked){
+            selectedSecondaries = realOptions.length ? realOptions : [SCOPE_ALL_DIRECT];
+            secondaryVisualOverride = "all";
+        }else{
+            selectedSecondaries = [SCOPE_ALL_DIRECT];
+            secondaryVisualOverride = "clear";
+        }
+        currentScope.secondary = selectedSecondaries.includes(SCOPE_ALL_DIRECT) ? SCOPE_ALL_DIRECT : selectedSecondaries.join(",");
+        selectedDetails = [SCOPE_ALL_SUB];
+        currentScope.detail = SCOPE_ALL_SUB;
+        currentScope.city = SCOPE_ALL_CITY;
+        renderSecondaryChecklist(options);
+        updateSecondaryTrigger();
+        await refreshScopedBusiness();
+        renderSelectors();
+        return;
+    }
+    const checks = document.querySelectorAll("#secondaryChecklist input:checked");
+    selectedSecondaries = Array.from(checks).map(c => c.value).filter(v => v !== SCOPE_ALL_DIRECT);
+    if(!selectedSecondaries.length){
+        selectedSecondaries = [SCOPE_ALL_DIRECT];
+    }
+    currentScope.secondary = selectedSecondaries.includes(SCOPE_ALL_DIRECT) ? SCOPE_ALL_DIRECT : selectedSecondaries.join(",");
+    selectedDetails = [SCOPE_ALL_SUB];
+    currentScope.detail = SCOPE_ALL_SUB;
+    currentScope.city = SCOPE_ALL_CITY;
+    updateSecondaryTrigger();
+    await refreshScopedBusiness();
+    renderSelectors();
+}
+
+function updateSecondaryTrigger(){
+    const label = document.getElementById("secondaryTriggerLabel");
+    if(!label) return;
+    if(selectedSecondaries.includes(SCOPE_ALL_DIRECT) || !selectedSecondaries.length){
+        label.textContent = "全部直属机构";
+    }else if(selectedSecondaries.length === 1){
+        label.textContent = selectedSecondaries[0];
+    }else{
+        label.textContent = `已选 ${selectedSecondaries.length} 项`;
+    }
+}
+
+function renderDetailChecklist(detailList){
+    const list = document.getElementById("detailChecklist");
+    if(!list) return;
+    const source = Array.isArray(detailList) && detailList.length ? detailList : [SCOPE_ALL_SUB];
+    const options = source.filter((v,i,a) => a.indexOf(v) === i);
+    const realOptions = options.filter(v => v !== SCOPE_ALL_SUB);
+    const allRealSelected = realOptions.length > 0 && realOptions.every(v => selectedDetails.includes(v));
+    if(!selectedDetails.length) selectedDetails = [SCOPE_ALL_SUB];
+    list.innerHTML = options.map(v => `
+        <label class="multi-select-option">
+            <input type="checkbox" value="${v}" ${detailVisualOverride === "clear" ? "" : (detailVisualOverride === "all" || selectedDetails.includes(v) || (v === SCOPE_ALL_SUB && allRealSelected)) ? "checked" : ""}
+                   onchange="onDetailCheckChange(event)">
+            <span>${v}</span>
+        </label>
+    `).join("");
+    updateDetailTrigger();
+}
+
+async function onDetailCheckChange(event){
+    detailVisualOverride = null;
+    const {detailList} = syncScopeState();
+    const options = (detailList || [SCOPE_ALL_SUB]).filter((v,i,a) => a.indexOf(v) === i);
+    const realOptions = options.filter(v => v !== SCOPE_ALL_SUB);
+    if(event?.target?.value === SCOPE_ALL_SUB){
+        if(event.target.checked){
+            selectedDetails = realOptions.length ? realOptions : [SCOPE_ALL_SUB];
+            detailVisualOverride = "all";
+        }else{
+            selectedDetails = [SCOPE_ALL_SUB];
+            detailVisualOverride = "clear";
+        }
+        currentScope.detail = selectedDetails.includes(SCOPE_ALL_SUB) ? SCOPE_ALL_SUB : selectedDetails.join(",");
+        currentScope.city = SCOPE_ALL_CITY;
+        renderDetailChecklist(options);
+        updateDetailTrigger();
+        await refreshScopedBusiness();
+        renderSelectors();
+        return;
+    }
+    const checks = document.querySelectorAll("#detailChecklist input:checked");
+    selectedDetails = Array.from(checks).map(c => c.value).filter(v => v !== SCOPE_ALL_SUB);
+    if(!selectedDetails.length){ selectedDetails = [SCOPE_ALL_SUB]; }
+    currentScope.detail = selectedDetails.includes(SCOPE_ALL_SUB) ? SCOPE_ALL_SUB : selectedDetails.join(",");
+    updateDetailTrigger();
+    currentScope.city = SCOPE_ALL_CITY;
+    await refreshScopedBusiness();
+    renderSelectors();
+}
+
+function updateDetailTrigger(){
+    const label = document.getElementById("detailTriggerLabel");
+    if(!label) return;
+    if(selectedDetails.includes(SCOPE_ALL_SUB) || !selectedDetails.length){
+        label.textContent = "全部下属机构";
+    }else if(selectedDetails.length === 1){
+        label.textContent = selectedDetails[0];
+    }else{
+        label.textContent = `已选 ${selectedDetails.length} 项`;
+    }
+}
+
+function toggleMultiSelect(id){
+    const dropdown = id === "secondaryMultiSelect"
+        ? document.getElementById("secondaryDropdown")
+        : document.getElementById("detailDropdown");
+    if(!dropdown) return;
+    dropdown.hidden = !dropdown.hidden;
+    if(!dropdown.hidden && id === "secondaryMultiSelect") renderSecondaryChecklist(scopeOptions.secondary || [SCOPE_ALL_DIRECT]);
+    if(!dropdown.hidden && id === "detailMultiSelect"){
+        const {detailList} = syncScopeState();
+        renderDetailChecklist(detailList);
+    }
+}
+document.addEventListener("click", function(e){
+    const sms = document.getElementById("secondaryMultiSelect");
+    const dms = document.getElementById("detailMultiSelect");
+    if(sms && !sms.contains(e.target)){
+        document.getElementById("secondaryDropdown").hidden = true;
+    }
+    if(dms && !dms.contains(e.target)){
+        document.getElementById("detailDropdown").hidden = true;
+    }
+});
+
+async function selectAllMulti(id){
+    if(id === "secondaryMultiSelect"){
+        const options = (scopeOptions.secondary || [SCOPE_ALL_DIRECT])
+            .filter((v,i,a) => a.indexOf(v) === i);
+        const realOptions = options.filter(v => v !== SCOPE_ALL_DIRECT);
+        selectedSecondaries = realOptions.length ? realOptions : [SCOPE_ALL_DIRECT];
+        currentScope.secondary = selectedSecondaries.includes(SCOPE_ALL_DIRECT) ? SCOPE_ALL_DIRECT : selectedSecondaries.join(",");
+        selectedDetails = [SCOPE_ALL_SUB];
+        currentScope.detail = SCOPE_ALL_SUB;
+        currentScope.city = SCOPE_ALL_CITY;
+        secondaryVisualOverride = "all";
+        detailVisualOverride = null;
+        updateSecondaryTrigger();
+        renderSecondaryChecklist(options);
+        await refreshScopedBusiness();
+        renderSelectors();
+        return;
+    }
+
+    const {detailList} = syncScopeState();
+    const options = (detailList || [SCOPE_ALL_SUB]).filter((v,i,a) => a.indexOf(v) === i);
+    const realOptions = options.filter(v => v !== SCOPE_ALL_SUB);
+    selectedDetails = realOptions.length ? realOptions : [SCOPE_ALL_SUB];
+    currentScope.detail = selectedDetails.includes(SCOPE_ALL_SUB) ? SCOPE_ALL_SUB : selectedDetails.join(",");
+    currentScope.city = SCOPE_ALL_CITY;
+    detailVisualOverride = "all";
+    updateDetailTrigger();
+    renderDetailChecklist(options);
+    await refreshScopedBusiness();
+    renderSelectors();
+}
+async function clearMultiSelect(id){
+    if(id === "secondaryMultiSelect"){
+        selectedSecondaries = [SCOPE_ALL_DIRECT];
+        currentScope.secondary = SCOPE_ALL_DIRECT;
+        selectedDetails = [SCOPE_ALL_SUB];
+        currentScope.detail = SCOPE_ALL_SUB;
+        currentScope.city = SCOPE_ALL_CITY;
+        secondaryVisualOverride = "clear";
+        detailVisualOverride = "clear";
+        updateSecondaryTrigger();
+        renderSecondaryChecklist(scopeOptions.secondary || [SCOPE_ALL_DIRECT]);
+        const {detailList} = syncScopeState();
+        renderDetailChecklist(detailList);
+        await refreshScopedBusiness();
+        renderSelectors();
+        return;
+    }
+
+    selectedDetails = [SCOPE_ALL_SUB];
+    currentScope.detail = SCOPE_ALL_SUB;
+    currentScope.city = SCOPE_ALL_CITY;
+    detailVisualOverride = "clear";
+    updateDetailTrigger();
+    const {detailList} = syncScopeState();
+    renderDetailChecklist(detailList);
+    await refreshScopedBusiness();
+    renderSelectors();
+}
+
+function renderTimeline(){
+    const rail = document.getElementById("timelineRail");
+    rail.innerHTML = timelineOptions().map(item => `
+        <button type="button" class="timeline-node ${item.key === currentTimeline ? "active" : ""}" data-key="${item.key}">
+            <strong>${item.title}</strong>
+            <span>${item.subtitle}</span>
+        </button>
+    `).join("");
+    rail.querySelectorAll(".timeline-node").forEach(node => {
+        node.addEventListener("click", async () => {
+            currentTimeline = node.dataset.key;
+            renderTimeline();
+            await refreshScopedBusiness();
+        });
+    });
+}
+
+function quarterTrendData(){
+    const rows = Array.isArray(currentBusinessData.quarter_trends) ? currentBusinessData.quarter_trends : [];
+    const labelMap = {"Q1":"一季度","Q2":"二季度","Q3":"三季度","Q4":"四季度"};
+    const base = ["Q1", "Q2", "Q3", "Q4"].map((quarter, index) => ({
+        quarter,
+        label: labelMap[quarter],
+        quarter_index: index + 1,
+        contract_yi: 0,
+        project_count: 0,
+    }));
+    rows.forEach(item => {
+        const idx = base.findIndex(row => row.quarter === item.quarter);
+        if(idx >= 0){
+            base[idx] = {
+                ...base[idx],
+                ...item,
+            };
+        }
+    });
+    return base;
+}
+
+function renderChartMeta(){
+    const kicker = document.getElementById("chartPanelKicker");
+    const title = document.getElementById("chartPanelTitle");
+    if(currentChart === "line"){
+        kicker.textContent = "BALANCE & QUARTER TREND";
+        title.textContent = "六维均衡雷达图 / 季度折线";
+    }else{
+        kicker.textContent = "BALANCE & QUARTER TREND";
+        title.textContent = "六维均衡雷达图 / 季度折线";
+    }
+}
+
+function summaryData(){
+    const scoped = resolveScopedRecord();
+    const summary = currentBusinessData.summary || {};
+    const overview = currentBusinessData.overview || {};
+    const modules = scoped.modules || overview.module_scores || {};
+    const values = MODULE_KEYS.map((key, index) => {
+        if(scoped.moduleValues && typeof scoped.moduleValues[index] !== "undefined"){
+            return num(scoped.moduleValues[index], 0);
+        }
+        return num(modules[key], 0);
+    });
+    return {
+        totalScore: num(scoped.totalScore ?? overview.total_score, 0),
+        diagnosis: String(scoped.diagnosis || overview.diagnosis || overview["经营诊断"] || "当前暂无综合诊断。"),
+        projectCount: num(scoped.projectCount ?? summary.total_projects, 0),
+        contractTotal: num(scoped.contractTotal ?? summary.total_contract_yi, 0),
+        moduleValues: values,
+        strongCount: values.filter(v => v >= num(BIZ_CONFIG.score_bands?.["强势区下限"], 80)).length,
+        pressureCount: values.filter(v => v < num(BIZ_CONFIG.score_bands?.["稳健区下限"], 65)).length,
+    };
+}
+
+function resolveScopedRecord(){
+    const subsidiaries = Array.isArray(currentBusinessData.subsidiaries) ? currentBusinessData.subsidiaries : [];
+    const cities = Array.isArray(currentBusinessData.cities) ? currentBusinessData.cities : [];
+    if(currentScope.city && currentScope.city !== SCOPE_ALL_CITY){
+        const row = cities.find(item => String(item["名称"] || item["城市"] || "").trim() === currentScope.city);
+        if(row){
+            return {
+                totalScore: row["综合得分"],
+                diagnosis: row["经营诊断"],
+                projectCount: row["项目数"],
+                contractTotal: row["签约额（亿元）"],
+                moduleValues: [
+                    row["模块一_得分"], row["模块二_得分"], row["模块三_得分"],
+                    row["模块四_得分"], row["模块五_得分"], row["模块六_得分"],
+                ],
+                record: row,
+            };
+        }
+    }
+    const isSingleDetail = selectedDetails && selectedDetails.length === 1 && !selectedDetails.includes(SCOPE_ALL_SUB);
+    if(isSingleDetail){
+        const row = subsidiaries.find(item => String(item["名称"] || item["申报单位"] || "").trim() === selectedDetails[0]);
+        if(row){
+            return {
+                totalScore: row["综合得分"],
+                diagnosis: row["经营诊断"],
+                projectCount: row["项目数"],
+                contractTotal: row["签约额（亿元）"],
+                moduleValues: [
+                    row["模块一_得分"], row["模块二_得分"], row["模块三_得分"],
+                    row["模块四_得分"], row["模块五_得分"], row["模块六_得分"],
+                ],
+                record: row,
+            };
+        }
+    }
+    return {
+        modules: currentBusinessData.overview?.module_scores || {},
+        record: null,
+    };
+}
+
+function refreshHero(){
+    const data = summaryData();
+    const tone = getGlobalTone(data.totalScore);
+    const scoreColor = mixScoreColor(data.totalScore);
+    const scoreEl = document.getElementById("healthScore");
+    scoreEl.textContent = fmt(data.totalScore, 1);
+    scoreEl.style.color = scoreColor;
+    scoreEl.style.textShadow = `0 8px 30px ${scoreColor.replace("rgb", "rgba").replace(")", ", 0.18)")}`;
+    document.getElementById("healthTone").textContent = tone.label;
+    document.getElementById("healthTone").style.color = tone.color;
+    document.getElementById("healthTone").style.boxShadow = `inset 0 0 0 1px ${tone.color}22`;
+    document.getElementById("healthSummary").textContent = data.diagnosis;
+    document.getElementById("strongModuleCount").textContent = String(data.strongCount);
+    document.getElementById("pressureModuleCount").textContent = String(data.pressureCount);
+    document.getElementById("projectCount").textContent = String(data.projectCount);
+    document.getElementById("contractTotal").textContent = fmt(data.contractTotal, 2);
+    document.getElementById("scopeChip").textContent = formatScopeChip();
+    const timelineLabel = currentTimeline === "实时" ? "实时数据" : `${currentTimeline.replace("Q1","一季度").replace("Q2","二季度").replace("Q3","三季度").replace("Q4","四季度")} 周期`;
+    document.getElementById("timelineChip").textContent = timelineLabel;
+}
+
+async function loadBizConfig(){
+    try{
+        const resp = await fetch("/api/business/config");
+        const data = await resp.json();
+        if(data && !data.error){
+            BIZ_CONFIG = data;
+        }
+    }catch(error){
+        console.warn("[business] config fallback", error);
+    }
+}
+
+async function loadScopeOptions(refreshSelectors = true){
+    try{
+        const resp = await fetch("/api/business/scope-options");
+        const data = await resp.json();
+        scopeOptions = {
+            ...buildScopeOptions(),
+            ...(scopeOptions || {}),
+            ...(data || {}),
+        };
+        if(refreshSelectors){
+            renderSelectors();
+        }
+    }catch(error){
+        console.warn("[business] scope-options fallback", error);
+    }
+}
+
+async function refreshScopedBusiness(){
+    const params = new URLSearchParams({
+        global: currentScope.global,
+        secondary: currentScope.secondary,
+        detail: currentScope.detail,
+        city: currentScope.city,
+        quarter: currentTimeline,
+    });
+    const resp = await fetch(`/api/business/scoped?${params.toString()}`);
+    currentBusinessData = await resp.json();
+    benchmarkData = {subsidiaries: [], cities: [], projects: []};
+    await loadModuleDetails();
+    refreshHero();
+    renderModules();
+    drawActiveChart();
+    await loadBenchmark(currentTab || "subsidiaries");
+}
+
+async function loadModuleDetails(){
+    const tasks = [1, 2, 3, 4, 5, 6].map(async (id) => {
+        try{
+            const params = new URLSearchParams({
+                global: currentScope.global,
+                secondary: currentScope.secondary,
+                detail: currentScope.detail,
+                city: currentScope.city,
+                quarter: currentTimeline,
+            });
+            const resp = await fetch(`/api/business/module/${id}?${params.toString()}`);
+            const data = await resp.json();
+            moduleDetails[id] = data || {};
+        }catch(error){
+            moduleDetails[id] = {module_id: id, score: 0, metrics: {}};
+        }
+    });
+    await Promise.all(tasks);
+}
+
+function metricPairs(moduleId){
+    const scoped = resolveScopedRecord();
+    const scopedRecord = scoped.record || {};
+    const scopedMetricNames = MODULE_METRIC_NAMES[moduleId - 1] || [];
+    if(scoped.record){
+        return scopedMetricNames.map(name => {
+            const raw = scopedRecord[name];
+            const score = num(raw, 0);
+            const unit = (name.includes("率") || name.includes("比") || name.includes("度") || name.includes("指数")) ? "%" : "";
+            return {
+                name,
+                score: fmt(score, 1) + unit,
+                formula: METRIC_FORMULAS[name] || "按当前业务口径自动测算",
+            };
+        });
+    }
+
+    const detail = moduleDetails[moduleId] || {};
+    const metrics = detail.metrics || {};
+    const names = Object.keys(metrics);
+    return names.map(name => {
+        const raw = metrics[name];
+        const value = raw && typeof raw === "object" ? raw.value : raw;
+        const score = num(value, 0);
+        const unit = (name.includes("率") || name.includes("比") || name.includes("度") || name.includes("指数")) ? "%" : "";
+        return {
+            name,
+            score: fmt(score, 1) + unit,
+            formula: typeof raw === "object" && raw !== null && raw.formula ? String(raw.formula) : (METRIC_FORMULAS[name] || "按当前业务口径自动测算"),
+        };
+    });
+}
+
+function renderModules(){
+    const host = document.getElementById("modulesGrid");
+    const scoped = resolveScopedRecord();
+    host.innerHTML = [1, 2, 3, 4, 5, 6].map(id => {
+        const detail = moduleDetails[id] || {};
+        const score = num(scoped.moduleValues?.[id - 1], num(detail.score, summaryData().moduleValues[id - 1] || 0));
+        const tone = getModuleTone(score);
+        const metrics = metricPairs(id);
+        return `
+            <article class="module-capsule" style="border-color:${tone.color}22;">
+                <div class="capsule-head">
+                    <div>
+                        <div class="capsule-index">Module ${id}</div>
+                        <div class="capsule-title">${MODULE_DETAIL_LABELS[id - 1]}</div>
+                    </div>
+                    <div class="capsule-score">
+                        <strong style="color:${tone.color};">${fmt(score, 1)}</strong>
+                        <span class="capsule-tone" style="color:${tone.color}; background:${tone.soft};">${tone.label}</span>
+                    </div>
+                </div>
+                <div class="metric-list">
+                    ${metrics.length ? metrics.map(item => `
+                        <div class="metric-row">
+                            <div class="metric-main">
+                                <div class="metric-label">${item.name}</div>
+                                <div class="metric-formula">${item.formula}</div>
+                            </div>
+                            <div class="metric-score">${item.score}</div>
+                        </div>
+                    `).join("") : `<div class="metric-row"><div class="metric-main"><div class="metric-label">暂无指标数据</div><div class="metric-formula">等待分析结果后自动生成</div></div><div class="metric-score">--</div></div>`}
+                </div>
+            </article>
+        `;
+    }).join("");
+}
+
+function drawRadar(){
+    const canvas = document.getElementById("moduleRadarCanvas");
+    if(!canvas){
+        return;
+    }
+    const ctx = canvas.getContext("2d");
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const width = rect.width || 520;
+    const height = rect.height || 500;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const values = summaryData().moduleValues;
+    if(values.every(v => !v)){
+        ctx.fillStyle = "#7d919d";
+        ctx.font = '14px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText("暂无六模块数据", width / 2, height / 2);
+        return;
+    }
+
+    const cx = width / 2;
+    const cy = height / 2 + 12;
+    const radius = Math.min(width, height) * 0.28;
+    const steps = 6;
+    const angleStep = (Math.PI * 2) / steps;
+
+    ctx.strokeStyle = "rgba(93, 116, 129, 0.24)";
+    ctx.lineWidth = 1.1;
+    [0.4, 0.7, 1].forEach(scale => {
+        ctx.beginPath();
+        for(let i = 0; i < steps; i += 1){
+            const angle = -Math.PI / 2 + angleStep * i;
+            const x = cx + Math.cos(angle) * radius * scale;
+            const y = cy + Math.sin(angle) * radius * scale;
+            if(i === 0){
+                ctx.moveTo(x, y);
+            }else{
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.closePath();
+        ctx.stroke();
+    });
+
+    for(let i = 0; i < steps; i += 1){
+        const angle = -Math.PI / 2 + angleStep * i;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+    }
+
+    ctx.beginPath();
+    values.forEach((value, index) => {
+        const angle = -Math.PI / 2 + angleStep * index;
+        const r = radius * clamp(value, 0, 100) / 100;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if(index === 0){
+            ctx.moveTo(x, y);
+        }else{
+            ctx.lineTo(x, y);
+        }
+    });
+    ctx.closePath();
+
+    const gradient = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+    gradient.addColorStop(0, "rgba(56, 139, 255, 0.30)");
+    gradient.addColorStop(0.5, "rgba(96, 182, 255, 0.20)");
+    gradient.addColorStop(1, "rgba(29, 102, 214, 0.28)");
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = "rgba(28, 84, 164, 0.90)";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+
+    values.forEach((value, index) => {
+        const angle = -Math.PI / 2 + angleStep * index;
+        const r = radius * clamp(value, 0, 100) / 100;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        const tone = getModuleTone(value);
+        ctx.beginPath();
+        ctx.fillStyle = "#ffffff";
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.strokeStyle = tone.color;
+        ctx.lineWidth = 2.2;
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.stroke();
+    });
+
+    MODULE_LABELS.forEach((label, index) => {
+        const angle = -Math.PI / 2 + angleStep * index;
+        const x = cx + Math.cos(angle) * (radius + 54);
+        const y = cy + Math.sin(angle) * (radius + 54);
+        ctx.fillStyle = "#3f5664";
+        ctx.font = '700 13px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = x > cx + 8 ? "left" : x < cx - 8 ? "right" : "center";
+        ctx.textBaseline = y > cy ? "top" : "bottom";
+        ctx.fillText(label, x, y);
+    });
+}
+
+function drawQuarterLine(){
+    const canvas = document.getElementById("moduleRadarCanvas");
+    if(!canvas){
+        return;
+    }
+    const ctx = canvas.getContext("2d");
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const width = rect.width || 520;
+    const height = rect.height || 500;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const rows = quarterTrendData();
+    const maxValue = Math.max(...rows.map(item => num(item.total_score, 0)), 0);
+    const top = 42;
+    const left = 72;
+    const right = width - 28;
+    const bottom = height - 58;
+    const chartWidth = right - left;
+    const chartHeight = bottom - top;
+
+    ctx.strokeStyle = "rgba(93, 116, 129, 0.18)";
+    ctx.lineWidth = 1;
+    for(let i = 0; i < 4; i += 1){
+        const y = top + (chartHeight / 3) * i;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(left, top);
+    ctx.lineTo(left, bottom);
+    ctx.lineTo(right, bottom);
+    ctx.strokeStyle = "rgba(63, 86, 100, 0.42)";
+    ctx.stroke();
+
+    if(maxValue <= 0){
+        ctx.fillStyle = "#7d919d";
+        ctx.font = '14px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText("暂无季度趋势数据", width / 2, height / 2);
+        return;
+    }
+
+    const points = rows.map((item, index) => {
+        const x = left + (chartWidth / Math.max(rows.length - 1, 1)) * index;
+        const y = bottom - (num(item.total_score, 0) / maxValue) * chartHeight;
+        return {...item, x, y};
+    });
+
+    const area = ctx.createLinearGradient(0, top, 0, bottom);
+    area.addColorStop(0, "rgba(39,130,214,0.28)");
+    area.addColorStop(1, "rgba(39,130,214,0.02)");
+
+    ctx.beginPath();
+    points.forEach((point, index) => {
+        if(index === 0){
+            ctx.moveTo(point.x, point.y);
+        }else{
+            ctx.lineTo(point.x, point.y);
+        }
+    });
+    ctx.lineTo(points[points.length - 1].x, bottom);
+    ctx.lineTo(points[0].x, bottom);
+    ctx.closePath();
+    ctx.fillStyle = area;
+    ctx.fill();
+
+    ctx.beginPath();
+    points.forEach((point, index) => {
+        if(index === 0){
+            ctx.moveTo(point.x, point.y);
+        }else{
+            ctx.lineTo(point.x, point.y);
+        }
+    });
+    ctx.strokeStyle = "#2782d6";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    points.forEach(point => {
+        ctx.beginPath();
+        ctx.fillStyle = "#ffffff";
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.strokeStyle = "#2782d6";
+        ctx.lineWidth = 2;
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#3f5664";
+        ctx.font = '700 12px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(fmt(point.total_score, 1), point.x, point.y - 10);
+    });
+
+    rows.forEach((item, index) => {
+        const x = left + (chartWidth / Math.max(rows.length - 1, 1)) * index;
+        ctx.fillStyle = "#3f5664";
+        ctx.font = '700 13px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(item.label || item.quarter, x, bottom + 14);
+    });
+
+    [0, maxValue / 3, (maxValue / 3) * 2, maxValue].forEach((value, index) => {
+        const y = bottom - (chartHeight / 3) * index;
+        ctx.fillStyle = "#6c808d";
+        ctx.font = '12px "Microsoft YaHei UI", sans-serif';
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(fmt(value, 1), left - 10, y);
+    });
+}
+
+function drawActiveChart(){
+    renderChartMeta();
+    if(currentChart === "line"){
+        drawQuarterLine();
+        return;
+    }
+    drawRadar();
+}
+
+async function loadBenchmark(scope = "subsidiaries"){
+    const params = new URLSearchParams({
+        global: currentScope.global,
+        secondary: currentScope.secondary,
+        detail: currentScope.detail,
+        city: currentScope.city,
+        quarter: currentTimeline,
+    });
+    const resp = await fetch(`/api/business/benchmark/${scope}?${params.toString()}`);
+    benchmarkData[scope] = await resp.json();
+    currentTab = scope;
+    renderBenchmark(scope);
+}
+
+function renderBenchmark(scope){
+    const rows = benchmarkData[scope] || [];
+    const table = document.getElementById("benchmarkTable");
+    const map = {
+        subsidiaries: ["名称", "综合得分", "项目数", "签约额（亿元）", "模块一_得分", "模块二_得分", "模块三_得分", "模块四_得分", "模块五_得分", "模块六_得分", "经营诊断"],
+        cities: ["名称", "综合得分", "项目数", "签约额（亿元）", "模块一_得分", "模块二_得分", "模块三_得分", "模块四_得分", "模块五_得分", "模块六_得分", "经营诊断"],
+        projects: ["项目名称", "风险得分", "红色预警", "合同额（亿元）", "问题分类"],
+    };
+    const headers = map[scope];
+    const colWeights = scope === "projects"
+        ? [36, 16, 14, 16, 34]
+        : [20, 10, 8, 12, 8, 8, 8, 8, 8, 8, 22];
+    let colgroup = table.querySelector("colgroup");
+    if (!colgroup) {
+        colgroup = document.createElement("colgroup");
+        table.insertBefore(colgroup, table.firstChild);
+    }
+    const totalWeight = colWeights.reduce((sum, weight) => sum + weight, 0);
+    colgroup.innerHTML = colWeights.map((weight) => `<col style="width:${((weight / totalWeight) * 100).toFixed(2)}%">`).join("");
+    table.querySelector("thead").innerHTML = `<tr>${headers.map(key => `<th>${key}</th>`).join("")}</tr>`;
+    if(!rows.length){
+        table.querySelector("tbody").innerHTML = `<tr><td class="empty-cell" colspan="${headers.length}">暂无数据</td></tr>`;
+        return;
+    }
+
+    if(scope === "projects"){
+        table.querySelector("tbody").innerHTML = rows.map(row => `
+            <tr>
+                <td class="text-cell">${row.project_name || row["项目名称"] || "--"}</td>
+                <td class="center"><span class="score-pill">${fmt(row.risk_score, 1)}</span></td>
+                <td class="center">${num(row.red_count, 0)}</td>
+                <td class="center">${fmt(row.contract_yi, 2)}</td>
+                <td class="text-cell">${row.categories || "--"}</td>
+            </tr>
+        `).join("");
+        return;
+    }
+
+    table.querySelector("tbody").innerHTML = rows.map(row => `
+        <tr>
+            <td class="text-cell">${row["名称"] || row["城市"] || row["申报单位"] || "--"}</td>
+            <td class="center"><span class="score-pill">${fmt(row["综合得分"], 1)}</span></td>
+            <td class="num">${num(row["项目数"], 0)}</td>
+            <td class="money-cell">${fmt(row["签约额（亿元）"], 2)}</td>
+            <td class="center">${fmt(row["模块一_得分"], 1)}</td>
+            <td class="center">${fmt(row["模块二_得分"], 1)}</td>
+            <td class="center">${fmt(row["模块三_得分"], 1)}</td>
+            <td class="center">${fmt(row["模块四_得分"], 1)}</td>
+            <td class="center">${fmt(row["模块五_得分"], 1)}</td>
+            <td class="center">${fmt(row["模块六_得分"], 1)}</td>
+            <td class="diagnosis-cell">${row["经营诊断"] || "--"}</td>
+        </tr>
+    `).join("");
+}
+
+function wireEvents(){
+    document.getElementById("globalSelect").addEventListener("change", async (event) => {
+        currentScope.global = event.target.value;
+        selectedSecondaries = [SCOPE_ALL_DIRECT];
+        selectedDetails = [SCOPE_ALL_SUB];
+        currentScope.secondary = SCOPE_ALL_DIRECT;
+        currentScope.detail = SCOPE_ALL_SUB;
+        currentScope.city = SCOPE_ALL_CITY;
+        renderSelectors();
+        await refreshScopedBusiness();
+    });
+    document.getElementById("citySelect").addEventListener("change", async (event) => {
+        currentScope.city = event.target.value;
+        await refreshScopedBusiness();
+    });
+
+    document.querySelectorAll("#tabSwitch button").forEach(button => {
+        button.addEventListener("click", async () => {
+            document.querySelectorAll("#tabSwitch button").forEach(item => item.classList.remove("active"));
+            button.classList.add("active");
+            const tab = button.dataset.tab;
+            if(!benchmarkData[tab] || !benchmarkData[tab].length){
+                await loadBenchmark(tab);
+            }else{
+                currentTab = tab;
+                renderBenchmark(tab);
+            }
+        });
+    });
+
+    document.querySelectorAll("#chartSwitch button").forEach(button => {
+        button.addEventListener("click", () => {
+            document.querySelectorAll("#chartSwitch button").forEach(item => item.classList.remove("active"));
+            button.classList.add("active");
+            currentChart = button.dataset.chart;
+            drawActiveChart();
+        });
+    });
+
+    window.addEventListener("resize", drawActiveChart);
+
+    // ── 评分规则面板折叠/展开 ──
+    const rulesBody = document.getElementById("rulesBody");
+    const rulesToggleBtn = document.getElementById("rulesToggleBtn");
+    const rulesHead = document.getElementById("rulesHead");
+    if(rulesHead && rulesBody && rulesToggleBtn){
+        const toggleRules = () => {
+            const hidden = rulesBody.style.display === "none";
+            rulesBody.style.display = hidden ? "" : "none";
+            rulesToggleBtn.textContent = hidden ? "收起 ▲" : "展开 ▼";
+        };
+        rulesHead.addEventListener("click", toggleRules);
+        rulesToggleBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleRules(); });
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    renderSelectors();
+    renderTimeline();
+    wireEvents();
+    refreshHero();
+    renderModules();
+    drawActiveChart();
+
+    void loadBizConfig();
+    void loadScopeOptions(true);
+    void loadModuleDetails().then(() => {
+        renderModules();
+        drawActiveChart();
+    });
+    void loadBenchmark("subsidiaries");
+});
+</script>
+{% endblock %}

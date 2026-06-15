@@ -1,0 +1,48 @@
+# 输出文件（运行时生成，不纳入版本控制）
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+
+# 虚拟环境
+venv/
+.env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# 文本提取中间文件（系统直接从 Excel 读取，这些已废弃）
+_extract_*.txt
+
+# 临时文件
+*.tmp
+*.bak
+~$*
+
+# macOS
+.DS_Store
+
+# Excel 临时文件
+~$*.xlsx
+~$*.xls
+
+# 数据与文档文件（不纳入版本控制，仅在本地使用）
+*.xlsx
+*.xls
+*.docx
+*.pdf
+*.csv
+*.md
