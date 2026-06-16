@@ -639,7 +639,10 @@ async function resetPageSession() {
 }
 
 function shouldResetOnLoad() {
-    return true;
+    if (sessionStorage.getItem("auditInternalNavigation") === "1") {
+        sessionStorage.removeItem("auditInternalNavigation");
+    }
+    return false;
 }
 
 async function pollStatus() {

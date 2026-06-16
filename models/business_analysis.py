@@ -115,6 +115,15 @@ class BusinessHealthAnalyzer:
         hrt = cfg.get("high_risk_threshold", {})
         self.HIGH_RISK_SCORE = hrt.get("risk_score下限", 6)
 
+        # v3.1: 红线穿透经营总分的约束参数
+        tsc = cfg.get("total_score_constraints", {})
+        self.REDLINE_MODULE_CAP = tsc.get("红线模块否决封顶", 60)
+        self.CONTRACT_VETO_CAP = tsc.get("合同底线穿透封顶", 50)
+        self.MIN_MODULE_THRESHOLD = tsc.get("最低模块阈值", 40)
+        self.MIN_MODULE_CAP = tsc.get("最低模块封顶", 65)
+        self.DUAL_WEAK_THRESHOLD = tsc.get("双弱模块阈值", 55)
+        self.DUAL_WEAK_DISCOUNT = tsc.get("双弱模块折扣", 0.85)
+
         m1 = cfg.get("module_1_region", {})
         self.W1 = {k: m1.get(k, v) for k, v in {
             "区域渗透率": 0.20, "跨区域经营指数_逆向": 0.30, "深耕区域集中度": 0.15,
@@ -589,6 +598,11 @@ class BusinessHealthAnalyzer:
             + m6.score * self.MODULE_WEIGHTS["data_quality"]
         ) * 100  # 归一化到0-100
 
+        # v3.1: 红线穿透约束——底线不能被平均洗白
+        total_score, constraint_reasons = self._apply_total_score_constraints(
+            total_score, [m1, m2, m3, m4, m5, m6]
+        )
+
         return {
             # 基础信息
             "名称": scope_name,
@@ -675,6 +689,57 @@ class BusinessHealthAnalyzer:
             module_id, ms.metrics, ms.score)
 
         return ms
+
+    # ═══════════════════════════════════════════════════════════
+    # v3.1: 红线穿透约束层
+    # ═══════════════════════════════════════════════════════════
+
+    def _apply_total_score_constraints(self, total_score: float, modules: list) -> tuple:
+        """对经营总分应用底线约束，确保红线模块无法被平均洗白。
+
+        按序取最严约束：
+        1. 任一红线模块被否决 → 总分封顶至 REDLINE_MODULE_CAP
+        2. 模块三（合同）被否决 → 总分封顶至 CONTRACT_VETO_CAP（更严）
+        3. 最低模块 < MIN_MODULE_THRESHOLD → 总分封顶至 MIN_MODULE_CAP
+        4. 同时 ≥2 个模块 < DUAL_WEAK_THRESHOLD → 总分乘以 DUAL_WEAK_DISCOUNT
+
+        Returns:
+            (约束后得分, 触发原因列表)
+        """
+        reasons = []
+        constrained_score = total_score
+
+        # 检查红线否决
+        module_scores = [m.score * 100 for m in modules]
+        veto_modules = []
+        for i, m in enumerate(modules):
+            if m.veto_triggered:
+                veto_modules.append(i + 1)
+
+        if 3 in veto_modules:
+            # 模块三（合同）被否决——最严
+            constrained_score = min(constrained_score, self.CONTRACT_VETO_CAP)
+            reasons.append(f"模块三（合同质量）红线否决，总分封顶 {self.CONTRACT_VETO_CAP}")
+        elif veto_modules:
+            # 其他红线模块被否决
+            constrained_score = min(constrained_score, self.REDLINE_MODULE_CAP)
+            reasons.append(f"模块{veto_modules}红线否决，总分封顶 {self.REDLINE_MODULE_CAP}")
+
+        # 检查最低模块
+        min_module_idx = module_scores.index(min(module_scores))
+        min_module_score = module_scores[min_module_idx]
+        if min_module_score < self.MIN_MODULE_THRESHOLD:
+            constrained_score = min(constrained_score, self.MIN_MODULE_CAP)
+            reasons.append(f"最低模块（模块{min_module_idx + 1}）得分 {min_module_score:.1f} < {self.MIN_MODULE_THRESHOLD}，总分封顶 {self.MIN_MODULE_CAP}")
+
+        # 检查双弱模块
+        weak_count = sum(1 for s in module_scores if s < self.DUAL_WEAK_THRESHOLD)
+        if weak_count >= 2:
+            constrained_score = constrained_score * self.DUAL_WEAK_DISCOUNT
+            weak_modules = [i + 1 for i, s in enumerate(module_scores) if s < self.DUAL_WEAK_THRESHOLD]
+            reasons.append(f"模块{weak_modules}同时低于 {self.DUAL_WEAK_THRESHOLD}，总分乘以 {self.DUAL_WEAK_DISCOUNT}")
+
+        return constrained_score, reasons
 
     def _module_1_region(self, group, project_codes, issue_index, total_contract):
         """模块一：区域布局健康度 — 6个指标."""

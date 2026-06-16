@@ -44,6 +44,7 @@ class DiscreteAnalyzer:
     """风险-收益离散化分析器，v2.10 六模块版."""
 
     def __init__(self, config: dict):
+        self._config = config  # v3.1: 存储config供_score_project_modules使用
         rules = config.get("离散化分析", {})
         if not rules:
             disc_path = os.path.join(os.path.dirname(__file__), "..", "config", "discrete_rules.json")
@@ -391,8 +392,164 @@ class DiscreteAnalyzer:
         }
 
     # ═══════════════════════════════════════════════════════════
+    # v3.1: 项目级真实评分 —— 接ScoringEngine
+    # ═══════════════════════════════════════════════════════════
+
+    def _score_project_modules(self, row: dict, all_results: dict, region_auth: dict = None) -> dict:
+        """为单个项目独立计算模块三/四/五得分（0-100），基于项目自身DMP字段+模型输出。
+
+        不再借用单位/城市聚合分，而是用ScoringEngine对项目逐指标评分。
+        模块一/二保留单位级来源（它们本质是聚合指标）。
+
+        Returns:
+            {"模块三_合同质量": 75.5, "模块四_履约盈利": 82.0, "模块五_资金效率": 68.5}
+        """
+        engine = self._get_scoring_engine(self._config)
+        proj_code = str(row.get("项目编码", ""))
+
+        # ── 模块三：合同质量 ──
+        m3_metrics = []
+
+        # 4.1 严禁底线触碰次数（veto）: 来自模型2.1
+        m21_df = all_results.get("2.1", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+        veto_count = 0
+        if len(m21_df) > 0 and "项目编码" in m21_df.columns:
+            proj_m21 = m21_df[m21_df["项目编码"].astype(str) == proj_code]
+            if len(proj_m21) > 0 and "严重等级" in m21_df.columns:
+                veto_count = (proj_m21["严重等级"].astype(str).str.contains("严禁投标|red", na=False)).sum()
+        m3_metrics.append({"name": "严禁底线触碰次数", "value": float(veto_count)})
+
+        # 4.2 限制投标触发次数: 同上
+        restrict_count = 0
+        if len(m21_df) > 0 and "项目编码" in m21_df.columns:
+            proj_m21 = m21_df[m21_df["项目编码"].astype(str) == proj_code]
+            if len(proj_m21) > 0 and "严重等级" in m21_df.columns:
+                restrict_count = (proj_m21["严重等级"].astype(str).str.contains("限制投标", na=False)).sum()
+        m3_metrics.append({"name": "限制投标触发次数", "value": float(restrict_count)})
+
+        # 4.3 付款条件优良率: 非2.1问题的项目占比
+        payment_good = 1.0 if veto_count + restrict_count == 0 else 0.0
+        m3_metrics.append({"name": "付款条件优良率", "value": payment_good})
+
+        # 4.4 合同条款不利度: 模型2.4标记
+        m24_df = all_results.get("2.4", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+        clause_bad = 0.0
+        if len(m24_df) > 0 and "项目编码" in m24_df.columns:
+            proj_m24 = m24_df[m24_df["项目编码"].astype(str) == proj_code]
+            clause_bad = 1.0 if len(proj_m24) > 0 else 0.0
+        m3_metrics.append({"name": "合同条款不利度", "value": clause_bad})
+
+        # 4.5 三证合规率: 许可证/三证问题占比
+        permit_ok = 1.0
+        if len(m24_df) > 0 and "项目编码" in m24_df.columns and "问题分类" in m24_df.columns:
+            proj_m24 = m24_df[m24_df["项目编码"].astype(str) == proj_code]
+            permit_issues = (proj_m24["问题分类"].astype(str).str.contains("三证|许可证", na=False)).sum()
+            permit_ok = 0.0 if permit_issues > 0 else 1.0
+        m3_metrics.append({"name": "三证合规率", "value": permit_ok})
+
+        m3_results = engine.evaluate_batch(m3_metrics, project_start_date=row.get("开工时间"), level="project")
+        m3_module = engine.calculate_module_score(m3_results)
+        m3_score = m3_module.get("module_score", 50.0)
+
+        # ── 模块四：履约盈利 ──
+        m4_metrics = []
+
+        contract_amt = safe_float(row.get("签约额（元）", 0))
+        actual_output = safe_float(row.get("实际完成产值", 0))
+
+        # 5.1 产值转化率 (0-2范围，插值到0-100)
+        conversion = actual_output / contract_amt if contract_amt > 0 else 0.0
+        conversion = max(0.0, min(2.0, conversion))
+        m4_metrics.append({"name": "产值转化率", "value": conversion})
+
+        # 5.2 盈利健康度: A值
+        a_value = safe_float(row.get("一次性经营效益率（%）（A值）", 0))
+        m4_metrics.append({"name": "盈利健康度", "value": a_value})
+
+        # 5.3 停工退场率: 模型2.5标记
+        m25_df = all_results.get("2.5", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+        stop_ratio = 0.0
+        if len(m25_df) > 0 and "项目编码" in m25_df.columns:
+            proj_m25 = m25_df[m25_df["项目编码"].astype(str) == proj_code]
+            stop_ratio = 1.0 if len(proj_m25) > 0 else 0.0
+        m4_metrics.append({"name": "停工退场率", "value": stop_ratio})
+
+        # 5.4 签约履约偏差率: 老签约+低产值转化
+        sign_deviation = 1.0 if (conversion < 0.5 and row.get("_sign_year", 0) > 0) else 0.0
+        m4_metrics.append({"name": "签约履约偏差率", "value": sign_deviation})
+
+        # 5.5 效益偏差率: 模型2.2
+        m22_df = all_results.get("2.2", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+        profit_dev = 0.0
+        if len(m22_df) > 0 and "项目编码" in m22_df.columns and "问题分类" in m22_df.columns:
+            proj_m22 = m22_df[m22_df["项目编码"].astype(str) == proj_code]
+            profit_dev = 1.0 if (proj_m22["问题分类"].astype(str).str.contains("偏差|差异", na=False)).any() else 0.0
+        m4_metrics.append({"name": "效益偏差率", "value": profit_dev})
+
+        # 5.6 在施项目活跃度: 产值>0且收款>0
+        collection = safe_float(row.get("累计收款", 0))
+        active = 1.0 if actual_output > 0 and collection > 0 else 0.0
+        m4_metrics.append({"name": "在施项目活跃度", "value": active})
+
+        m4_results = engine.evaluate_batch(m4_metrics, project_start_date=row.get("开工时间"), level="project")
+        m4_module = engine.calculate_module_score(m4_results)
+        m4_score = m4_module.get("module_score", 50.0)
+
+        # ── 模块五：资金效率 ──
+        m5_metrics = []
+
+        # 6.1 资金占用率: 保证金/合同额（从模型2.3）
+        m23_df = all_results.get("2.3", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+        capital_bound = 0.0
+        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "保证金金额" in m23_df.columns:
+            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
+            if len(proj_m23) > 0:
+                capital_bound = proj_m23["保证金金额"].apply(safe_float).sum()
+        capital_occupancy = capital_bound / contract_amt if contract_amt > 0 else 0.0
+        m5_metrics.append({"name": "资金占用率", "value": capital_occupancy})
+
+        # 6.2 保证金周转天数: 从模型2.3问题描述提取（简化为0）
+        m5_metrics.append({"name": "保证金周转天数", "value": 0.0})
+
+        # 6.3 逾期回收率: 项目2.3标记
+        overdue_ratio = 0.0
+        if len(m23_df) > 0 and "项目编码" in m23_df.columns:
+            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
+            overdue_ratio = 1.0 if len(proj_m23) > 0 else 0.0
+        m5_metrics.append({"name": "逾期回收率", "value": overdue_ratio})
+
+        # 6.4 资金回收率: 收款/签约
+        collection_rate = collection / contract_amt if contract_amt > 0 else 0.0
+        m5_metrics.append({"name": "资金回收率", "value": collection_rate})
+
+        # 6.5 预收款缺口率: 从模型2.3
+        advance_gap = 0.0
+        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "问题分类" in m23_df.columns:
+            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
+            advance_gap = 1.0 if (proj_m23["问题分类"].astype(str).str.contains("预收款", na=False)).any() else 0.0
+        m5_metrics.append({"name": "预收款缺口率", "value": advance_gap})
+
+        # 6.6 负流项目占比: 从模型2.3
+        negative_flow = 0.0
+        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "问题分类" in m23_df.columns:
+            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
+            negative_flow = 1.0 if (proj_m23["问题分类"].astype(str).str.contains("负流|资金负", na=False)).any() else 0.0
+        m5_metrics.append({"name": "负流项目占比", "value": negative_flow})
+
+        m5_results = engine.evaluate_batch(m5_metrics, project_start_date=row.get("开工时间"), level="project")
+        m5_module = engine.calculate_module_score(m5_results)
+        m5_score = m5_module.get("module_score", 50.0)
+
+        return {
+            "模块三_合同质量": round(m3_score, 1),
+            "模块四_履约盈利": round(m4_score, 1),
+            "模块五_资金效率": round(m5_score, 1),
+        }
+
+    # ═══════════════════════════════════════════════════════════
     # v2.10 新入口：基于六模块指标的R/E计算（兼容保留）
     # ═══════════════════════════════════════════════════════════
+
 
     def run_with_module_scores(self, all_results: dict, dmp_df: pd.DataFrame,
                                 business_results: dict = None,
@@ -587,20 +744,25 @@ class DiscreteAnalyzer:
             unit_mod = module_index.get(unit, self._default_modules())
             city_mod = module_index.get(city, unit_mod)
 
-            module_grid = self._project_grid_from_module_scores(unit_mod)
-            if module_grid is None and city_mod is not unit_mod:
-                module_grid = self._project_grid_from_module_scores(city_mod)
+            # v3.1: 接ScoringEngine，用项目自身字段算模块三/四/五，杀死单位借分
+            try:
+                proj_module_scores = self._score_project_modules(row, all_results, region_auth)
+                module_grid = self.run_dual_track(proj_module_scores, project_start_date=row.get("开工时间"), level="project")
+                if module_grid is not None:
+                    R = round(float(module_grid["r_score"]), 2)
+                    r_level = int(module_grid["r_level"])
+                    E = round(float(module_grid["e_score"]), 2)
+                    e_level = int(module_grid["e_level"])
+                    grid_key = module_grid["grid_key"]
+                    grid_name = module_grid["grid_name"]
+                    grid_strategy = module_grid["strategy"]
+                else:
+                    module_grid = None
+            except Exception as e:
+                module_grid = None
 
-            if module_grid is not None:
-                R = round(float(module_grid["r_score"]), 2)
-                r_level = int(module_grid["r_level"])
-                E = round(float(module_grid["e_score"]), 2)
-                e_level = int(module_grid["e_level"])
-                grid_key = module_grid["grid_key"]
-                grid_name = module_grid["grid_name"]
-                grid_strategy = module_grid["strategy"]
-            else:
-                # 回退兼容：缺模块分时才使用旧的子维度离散化逻辑
+            if module_grid is None:
+                # 回退兼容：ScoringEngine失败时才使用旧的子维度离散化逻辑
                 try:
                     r_region = self._module_indicator_to_level(
                         unit_mod, "跨区域经营指数", "inverse",
@@ -948,16 +1110,40 @@ class DiscreteAnalyzer:
         rows = []
         red_threshold = self.city_thresholds.get("红色城市阈值", 0.50)
         yellow_threshold = self.city_thresholds.get("黄色城市阈值", 0.30)
+        # v3.1: 聚合惩罚参数
+        disp_penalty = self.city_thresholds.get("方差惩罚系数", 0.3)
+        conc_penalty = self.city_thresholds.get("集中度惩罚系数", 0.5)
+        high_risk_thresh = self.city_thresholds.get("高危占比阈值", 0.2)
+
         for city, group in city_groups:
             if not city or city in ("nan", ""):
                 continue
             n = len(group)
-            avg_r = group["R_得分"].mean()
-            avg_e = group["E_得分"].mean()
+            total_contract = group["签约额（元）"].sum()
+            w = group["签约额（元）"].clip(lower=0)
+
+            # v3.1: 合同额加权均值 + 方差 + 集中度惩罚
+            if w.sum() > 0:
+                avg_r = (group["R_得分"] * w).sum() / w.sum()
+                avg_e = (group["E_得分"] * w).sum() / w.sum()
+            else:
+                avg_r = group["R_得分"].mean()
+                avg_e = group["E_得分"].mean()
+
+            std_r = group["R_得分"].std(ddof=0)
+            std_e = group["E_得分"].std(ddof=0)
+            high_risk_ratio = (group["R_等级"] == 3).mean()
+
+            # R轴惩罚（R大越差）
+            penalty_r = disp_penalty * std_r + conc_penalty * max(0, high_risk_ratio - high_risk_thresh)
+            adj_r = min(3.0, avg_r + penalty_r)
+
+            # E轴惩罚（E大越好，分化向下修正）
+            adj_e = max(1.0, avg_e - disp_penalty * std_e)
+
             grid_counts = group["九宫格"].value_counts().to_dict()
             elimination_pct = (grid_counts.get("淘汰区", 0) + grid_counts.get("整顿区", 0)) / n
             expansion_pct = (grid_counts.get("扩张区", 0) + grid_counts.get("培育区", 0)) / n
-            total_contract = group["签约额（元）"].sum()
             avg_confidence = group["数据置信度"].mean() if "数据置信度" in group.columns else 50.0
 
             if elimination_pct > red_threshold:
@@ -970,7 +1156,8 @@ class DiscreteAnalyzer:
             rows.append({
                 "城市": city, "项目数": n,
                 "合同总额（亿元）": round(total_contract / 1e8, 2),
-                "平均R": round(avg_r, 2), "平均E": round(avg_e, 2),
+                "平均R": round(adj_r, 2), "平均E": round(adj_e, 2),
+                "内部分化度R": round(std_r, 2),  # v3.1 新增列，供前端高亮
                 "淘汰整顿区占比": round(elimination_pct, 2),
                 "扩张培育区占比": round(expansion_pct, 2),
                 "城市标签": label,
@@ -986,12 +1173,36 @@ class DiscreteAnalyzer:
             return pd.DataFrame()
         unit_groups = proj_df.groupby("申报单位")
         rows = []
+        # v3.1: 聚合惩罚参数
+        disp_penalty = self.city_thresholds.get("方差惩罚系数", 0.3)
+        conc_penalty = self.city_thresholds.get("集中度惩罚系数", 0.5)
+        high_risk_thresh = self.city_thresholds.get("高危占比阈值", 0.2)
+
         for unit, group in unit_groups:
             n = len(group)
-            avg_r = group["R_得分"].mean()
-            avg_e = group["E_得分"].mean()
-            grid_counts = group["九宫格"].value_counts().to_dict()
             total_contract = group["签约额（元）"].sum()
+            w = group["签约额（元）"].clip(lower=0)
+
+            # v3.1: 合同额加权均值 + 方差 + 集中度惩罚
+            if w.sum() > 0:
+                avg_r = (group["R_得分"] * w).sum() / w.sum()
+                avg_e = (group["E_得分"] * w).sum() / w.sum()
+            else:
+                avg_r = group["R_得分"].mean()
+                avg_e = group["E_得分"].mean()
+
+            std_r = group["R_得分"].std(ddof=0)
+            std_e = group["E_得分"].std(ddof=0)
+            high_risk_ratio = (group["R_等级"] == 3).mean()
+
+            # R轴惩罚（R大越差）
+            penalty_r = disp_penalty * std_r + conc_penalty * max(0, high_risk_ratio - high_risk_thresh)
+            adj_r = min(3.0, avg_r + penalty_r)
+
+            # E轴惩罚（E大越好，分化向下修正）
+            adj_e = max(1.0, avg_e - disp_penalty * std_e)
+
+            grid_counts = group["九宫格"].value_counts().to_dict()
             expansion_pct = (grid_counts.get("扩张区", 0) + grid_counts.get("培育区", 0)) / n
             elimination_pct = (grid_counts.get("淘汰区", 0) + grid_counts.get("整顿区", 0)) / n
             avg_confidence = group["数据置信度"].mean() if "数据置信度" in group.columns else 50.0
@@ -1006,7 +1217,8 @@ class DiscreteAnalyzer:
             rows.append({
                 "申报单位": unit, "项目数": n,
                 "合同总额（亿元）": round(total_contract / 1e8, 2),
-                "平均R": round(avg_r, 2), "平均E": round(avg_e, 2),
+                "平均R": round(adj_r, 2), "平均E": round(adj_e, 2),
+                "内部分化度R": round(std_r, 2),  # v3.1 新增列，供前端高亮
                 "扩张区占比": round(expansion_pct, 2),
                 "淘汰区占比": round(elimination_pct, 2),
                 "单位类型": unit_type,

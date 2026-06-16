@@ -1906,14 +1906,13 @@ def api_uploaded_files():
             for path in candidate_paths:
                 if not path.exists():
                     continue
-                if key == "admin_structure" and path.name in {"admin_structure.xlsx", "行政架构-四局.xlsx"}:
-                    found = {
-                        "filename": path.name,
-                        "saved_as": path.name,
-                        "size": path.stat().st_size,
-                        "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
-                    }
-                    break
+                found = {
+                    "filename": path.name,
+                    "saved_as": path.name,
+                    "size": path.stat().st_size,
+                    "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                }
+                break
 
         slots_status[key] = {
             "label": info["label"],
