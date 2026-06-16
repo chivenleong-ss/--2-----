@@ -19,6 +19,26 @@ class Model33Zombie(BaseModel):
     priority = "P3"
     dimension = "客户健康度"
 
+    @staticmethod
+    def _parse_datetime(val):
+        """将字符串/NaT/None 安全解析为 datetime，无法解析返回 None."""
+        if val is None:
+            return None
+        if isinstance(val, float) and pd.isna(val):
+            return None
+        if isinstance(val, datetime):
+            return val
+        if isinstance(val, str):
+            val = val.strip()
+            if not val or val.lower() == "nat":
+                return None
+            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%Y%m%d"):
+                try:
+                    return datetime.strptime(val[:len(fmt)], fmt)
+                except ValueError:
+                    continue
+        return None
+
     def run(self, dmp, appendices, region_auth=None):
         logger = self.logger
         df = dmp.copy()
@@ -56,6 +76,31 @@ class Model33Zombie(BaseModel):
                                 f"（最晚{latest.strftime('%Y-%m')}），建议清理或降级"
                             ),
                         })
+
+        # ─── 1.5. 已签约未开工僵尸项目（签约>180天仍未开工）───
+        if "签约时间" in df.columns:
+            zombie_threshold_days = 180
+            for _, row in df.iterrows():
+                sign_dt = self._parse_datetime(row.get("签约时间"))
+                if sign_dt is None:
+                    continue
+                # 判断开工状态：开工时间为空/无效 → 未开工
+                start_dt = self._parse_datetime(row.get("开工时间"))
+                if start_dt is not None:
+                    continue  # 已开工，跳过
+                days_since_sign = (now - sign_dt).days
+                if days_since_sign > zombie_threshold_days:
+                    findings.append({
+                        "模型编号": "3.3",
+                        "项目名称": str(row.get("项目名称", "")),
+                        "客户名称": str(row.get("客户名称", "")),
+                        "问题分类": "已签约未开工僵尸项目",
+                        "严重等级": "red",
+                        "问题描述": (
+                            f"项目签约{days_since_sign}天未开工"
+                            f"（签约{sign_dt.strftime('%Y-%m-%d')}），判定为停滞/僵尸合同"
+                        ),
+                    })
 
         # ─── 2. 中标未签约僵尸（中标报量>12月未签约） ───
         if "中标额（元）" in df.columns and "中标报量时间" in df.columns:
@@ -160,7 +205,11 @@ class Model33Zombie(BaseModel):
 
         summary = {
             "zombie_customers": (
-                len(issues_df[issues_df["问题分类"].str.contains("僵尸")])
+                len(issues_df[issues_df["问题分类"].str.contains("僵尸客户")])
+                if len(issues_df) > 0 else 0
+            ),
+            "stagnant_projects": (
+                len(issues_df[issues_df["问题分类"].str.contains("已签约未开工僵尸项目")])
                 if len(issues_df) > 0 else 0
             ),
             "rating_mismatch": (

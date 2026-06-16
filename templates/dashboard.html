@@ -639,10 +639,28 @@ async function resetPageSession() {
 }
 
 function shouldResetOnLoad() {
-    if (sessionStorage.getItem("auditInternalNavigation") === "1") {
-        sessionStorage.removeItem("auditInternalNavigation");
+    const markerKey = "auditInternalNavigation";
+    const rawMarker = sessionStorage.getItem(markerKey);
+    sessionStorage.removeItem(markerKey);
+
+    let marker = null;
+    try {
+        marker = rawMarker ? JSON.parse(rawMarker) : null;
+    } catch (error) {
+        marker = null;
     }
-    return false;
+
+    const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
+    const navigationType = navigationEntry?.type || "";
+    const cameFromInternalHomeLink = Boolean(
+        marker
+        && marker.path === "/"
+        && Number.isFinite(marker.at)
+        && Date.now() - marker.at < 10000
+        && navigationType !== "reload"
+    );
+
+    return !cameFromInternalHomeLink;
 }
 
 async function pollStatus() {

@@ -428,7 +428,10 @@
                 }
 
                 if (url.origin === window.location.origin) {
-                    sessionStorage.setItem(markerKey, "1");
+                    sessionStorage.setItem(markerKey, JSON.stringify({
+                        path: url.pathname,
+                        at: Date.now()
+                    }));
                 }
             });
         })();

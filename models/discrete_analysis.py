@@ -78,6 +78,13 @@ class DiscreteAnalyzer:
         self.conf_high = cl.get("高置信度下限", 80)
         self.conf_medium = cl.get("中置信度下限", 50)
 
+        # v3.2: 动态阈值路由（按年份和工程类别）
+        dyn_bands = bh_cfg.get("score_bands_dynamic", {})
+        self._switch_year = dyn_bands.get("制度切换年份", 2026)
+        self._bands_new = dyn_bands.get("新制度", {"强势": 80, "稳健": 65})
+        self._bands_old = dyn_bands.get("历史", {"强势": 75, "稳健": 60})
+        self._bands_realestate = dyn_bands.get("地产", {"强势": 75, "稳健": 55})
+
         # v3.0: 九宫格映射规则（从config/rules.json读取，回退至discrete_rules.json）
         self._nine_grid = config.get("九宫格映射规则", {})
         if not self._nine_grid:
@@ -87,6 +94,22 @@ class DiscreteAnalyzer:
 
         # v3.0: 评分引擎引用（延迟初始化）
         self._scoring_engine = None
+
+        # v3.2: 提取所有 is_veto=true 的指标名 → 模块映射（驱动否决网）
+        self._veto_indicator_map = {}  # {indicator_name: module_key}
+        pl = config.get("Project_Level", {}) if config else {}
+        for mk, mv in pl.items():
+            if mk.startswith("_"):
+                continue
+            for ik, iv in mv.items():
+                if ik.startswith("_"):
+                    continue
+                if isinstance(iv, dict) and iv.get("is_veto"):
+                    self._veto_indicator_map[ik] = mk
+
+        # v3.2: 严禁投标清单（从 institutional 读取）
+        inst = config.get("institutional", {}) if config else {}
+        self._forbidden_bid_rules = inst.get("风险分级_严禁投标", {})
 
     def _get_scoring_engine(self, config: dict = None) -> ScoringEngine:
         """获取或懒初始化评分引擎."""
@@ -146,21 +169,48 @@ class DiscreteAnalyzer:
         else:
             return 3  # 高风险
 
-    @staticmethod
-    def score_to_return_tier(score_0_100: float) -> int:
-        """模块得分 → 收益档位 (E轴).
+    def _dynamic_risk_tier(self, score_0_100: float, project_year: int = None,
+                           engineering_type: str = None) -> int:
+        """v3.2: 动态阈值路由版 risk tier.
 
-        收益逻辑：得分越高 → 收益越高 → 档位越大
-        ≥80 → 高收益(3档)
-        65-79 → 中收益(2档)
-        <65 → 低收益(1档)
-
-        Args:
-            score_0_100: 模块0-100标准分
-
-        Returns:
-            3/2/1 收益档位
+        按项目年份和工程类型读取差异化阈值（80/65 vs 75/60 vs 地产 75/55）。
+        调用方不需传工程类型时自动回落全局默认。
         """
+        # 选策略：地产 > 新/旧制度
+        is_realestate = engineering_type and "地产" in str(engineering_type)
+        is_new = (project_year or 0) >= self._switch_year
+
+        if is_realestate:
+            strong, steady = self._bands_realestate.get("强势", 75), self._bands_realestate.get("稳健", 55)
+        elif is_new:
+            strong, steady = self._bands_new.get("强势", 80), self._bands_new.get("稳健", 65)
+        else:
+            strong, steady = self._bands_old.get("强势", 75), self._bands_old.get("稳健", 60)
+
+        if score_0_100 >= strong:
+            return 1
+        elif score_0_100 >= steady:
+            return 2
+        return 3
+
+    def _dynamic_return_tier(self, score_0_100: float, project_year: int = None,
+                             engineering_type: str = None) -> int:
+        """v3.2: 动态阈值路由版 return tier。"""
+        is_realestate = engineering_type and "地产" in str(engineering_type)
+        is_new = (project_year or 0) >= self._switch_year
+
+        if is_realestate:
+            strong, steady = self._bands_realestate.get("强势", 75), self._bands_realestate.get("稳健", 55)
+        elif is_new:
+            strong, steady = self._bands_new.get("强势", 80), self._bands_new.get("稳健", 65)
+        else:
+            strong, steady = self._bands_old.get("强势", 75), self._bands_old.get("稳健", 60)
+
+        if score_0_100 >= strong:
+            return 3
+        elif score_0_100 >= steady:
+            return 2
+        return 1
         if score_0_100 >= 80:
             return 3  # 高收益
         elif score_0_100 >= 65:
@@ -199,18 +249,64 @@ class DiscreteAnalyzer:
         return False
 
     def _has_contract_veto(self, proj_code, all_results) -> bool:
-        """模型2.1严禁投标触发时，九宫格强制覆盖为淘汰区."""
-        r21_df = all_results.get("2.1", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
-        if len(r21_df) == 0 or "项目编码" not in r21_df.columns:
+        """v3.2: 全量配置驱动 — 遍历 rules.json 所有 is_veto 指标检测一票否决。
+
+        检测维度（三级串联）：
+        1. 模型2.1 严禁投标 / 模型2.4 合同条款不利（合同底线）
+        2. 模型2.5 停工退场（履约红线）
+        3. 模型2.3 资金负流 / 逾期（资金红线）
+        """
+        code = str(proj_code)
+        if not code:
             return False
-        proj_issues = r21_df[r21_df["项目编码"].astype(str) == str(proj_code)]
-        if len(proj_issues) == 0:
-            return False
-        cols = [c for c in ("严重等级", "问题分类", "问题描述") if c in proj_issues.columns]
-        if not cols:
-            return False
-        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
-        return text.str.contains("严禁投标|red", na=False).any()
+
+        # ── 维度1: 合同底线（严禁投标） ← 模型2.1 ──
+        if "严禁底线触碰次数" in self._veto_indicator_map:
+            r21_df = all_results.get("2.1", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+            if len(r21_df) > 0 and "项目编码" in r21_df.columns:
+                proj_issues = r21_df[r21_df["项目编码"].astype(str) == code]
+                if len(proj_issues) > 0:
+                    cols = [c for c in ("严重等级", "问题分类", "问题描述") if c in proj_issues.columns]
+                    if cols:
+                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
+                        if text.str.contains("严禁投标|red|红线", na=False).any():
+                            return True
+
+        # ── 维度2: 合同条款不利（模型2.4 三证/条款问题）──
+        if "合同条款不利度" in self._veto_indicator_map:
+            r24_df = all_results.get("2.4", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+            if len(r24_df) > 0 and "项目编码" in r24_df.columns:
+                proj_issues = r24_df[r24_df["项目编码"].astype(str) == code]
+                if len(proj_issues) > 0 and "严重等级" in r24_df.columns:
+                    sevs = proj_issues["严重等级"].astype(str)
+                    if sevs.str.contains("严禁投标|red|红线", na=False).any():
+                        return True
+
+        # ── 维度3: 履约红线（停工退场） ← 模型2.5 ──
+        if "停工退场率" in self._veto_indicator_map:
+            r25_df = all_results.get("2.5", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+            if len(r25_df) > 0 and "项目编码" in r25_df.columns:
+                proj_issues = r25_df[r25_df["项目编码"].astype(str) == code]
+                if len(proj_issues) > 0:
+                    cols = [c for c in ("严重等级", "问题分类") if c in proj_issues.columns]
+                    if cols:
+                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
+                        if text.str.contains("停工|退场|停缓建|red|红线", na=False).any():
+                            return True
+
+        # ── 维度4: 资金红线（逾期/负流） ← 模型2.3 ──
+        if "逾期回收率" in self._veto_indicator_map or "负流项目占比" in self._veto_indicator_map:
+            r23_df = all_results.get("2.3", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
+            if len(r23_df) > 0 and "项目编码" in r23_df.columns:
+                proj_issues = r23_df[r23_df["项目编码"].astype(str) == code]
+                if len(proj_issues) > 0:
+                    cols = [c for c in ("严重等级", "问题分类", "问题描述") if c in proj_issues.columns]
+                    if cols:
+                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
+                        if text.str.contains("资金负流|严重逾期|red|红线", na=False).any():
+                            return True
+
+        return False
 
     def _apply_elimination_veto(self, reason: str = "合同底线严禁投标") -> dict:
         """返回一票否决后的淘汰区坐标与策略."""
@@ -233,8 +329,10 @@ class DiscreteAnalyzer:
         module_scores: dict[str, float],
         project_start_date: str = None,
         level: str = "project",
+        project_year: int = None,
+        engineering_type: str = None,
     ) -> dict:
-        """v3.0 双轨制主入口：从六模块0-100得分计算九宫格R/E坐标.
+        """v3.2 双轨制主入口：从六模块0-100得分计算九宫格R/E坐标.
 
         **双轨制路由规则**：
         - level="project": 仅读取模块三(合同质量)+模块四(履约盈利)+模块五(资金效率)
@@ -242,31 +340,20 @@ class DiscreteAnalyzer:
         - level="company": 读取全量六模块得分，用于分公司宏观画像。
 
         **R轴(风险维度)**：模块三(55%)+模块五(45%)
-          得分→档位: ≥80→1档(低风险), 65-79→2档(中风险), <65→3档(高风险)
+          得分→档位: 使用 _dynamic_risk_tier (按年份/工程类别路由阈值)
 
         **E轴(收益维度)**：模块四(55%)+模块五(45%)
-          得分→档位: ≥80→3档(高收益), 65-79→2档(中收益), <65→1档(低收益)
+          得分→档位: 使用 _dynamic_return_tier (按年份/工程类别路由阈值)
 
         Args:
-            module_scores: {"模块三_合同质量": 75, "模块四_履约盈利": 82,
-                            "模块五_资金效率": 68, ...}
-            project_start_date: 项目开工日期（可选，供成熟度时间豁免判断）
+            module_scores: {"模块三_合同质量": 75, "模块四_履约盈利": 82, ...}
+            project_start_date: 项目开工日期（可选）
             level: "project" | "company"
+            project_year: 项目签约年份（v3.2: 动态阈值路由用）
+            engineering_type: 工程类别（v3.2: 地产/基建差异化阈值）
 
         Returns:
-            {
-                "r_score": 2.1,          R轴连续分数 (1.0-3.0)
-                "e_score": 2.3,          E轴连续分数 (1.0-3.0)
-                "r_level": 2,            R轴离散档位
-                "e_level": 3,            E轴离散档位
-                "grid_key": "(2,3)",     九宫格坐标
-                "grid_name": "优化区",   九宫格名称
-                "strategy": "压缩风险...", 处置策略
-                "r_detail": {"模块三": {"score": 75, "tier": 2}, ...},
-                "e_detail": {...},
-                "level": "project",
-                "is_dual_track": true
-            }
+            {r_score, e_score, r_level, e_level, grid_key, grid_name, strategy, ...}
         """
         has_contract_veto = self._has_contract_veto_from_scores(module_scores)
 
@@ -305,11 +392,11 @@ class DiscreteAnalyzer:
         w5_r = r_weights.get("模块五_资金效率", {}).get("weight", 0.45)
         w1_r = 0.30 if level == "company" else 0.0
 
-        # 0-100 → 1-3 档位（风险方向）
-        r3_tier = self.score_to_risk_tier(mod3)
-        r5_tier = self.score_to_risk_tier(mod5)
+        # 0-100 → 1-3 档位（风险方向，v3.2: 动态阈值路由）
+        r3_tier = self._dynamic_risk_tier(mod3, project_year, engineering_type)
+        r5_tier = self._dynamic_risk_tier(mod5, project_year, engineering_type)
         if level == "company":
-            r1_tier = self.score_to_risk_tier(mod1)
+            r1_tier = self._dynamic_risk_tier(mod1, project_year, engineering_type)
             w3_r, w5_r = 0.40, 0.30
             r_components = [r1_tier, r3_tier, r5_tier]
             r_score = (r1_tier * w1_r + r3_tier * w3_r + r5_tier * w5_r) / (w1_r + w3_r + w5_r)
@@ -333,9 +420,9 @@ class DiscreteAnalyzer:
         w4_e = e_weights.get("模块四_履约盈利", {}).get("weight", 0.55)
         w5_e = e_weights.get("模块五_资金效率", {}).get("weight", 0.45)
 
-        # 0-100 → 1-3 档位（收益方向）
-        e4_tier = self.score_to_return_tier(mod4)
-        e5_tier = self.score_to_return_tier(mod5)
+        # 0-100 → 1-3 档位（收益方向，v3.2: 动态阈值路由）
+        e4_tier = self._dynamic_return_tier(mod4, project_year, engineering_type)
+        e5_tier = self._dynamic_return_tier(mod5, project_year, engineering_type)
         e_score = (e4_tier * w4_e + e5_tier * w5_e) / (w4_e + w5_e)
         e_score = round(max(1.0, min(3.0, e_score)), 2)
 
@@ -727,7 +814,7 @@ class DiscreteAnalyzer:
             "模块四": safe_float(module_data.get("scores", {}).get("模块四_得分", 50)),
             "模块五": safe_float(module_data.get("scores", {}).get("模块五_得分", 50)),
         }
-        return self.run_dual_track(score_map, level="project")
+        return self.run_dual_track(score_map, level="project", project_year=None, engineering_type=None)
 
     def _analyze_projects_with_modules(self, all_results, dmp_df, module_index,
                                         appendix_df=None, region_auth=None):
@@ -747,7 +834,13 @@ class DiscreteAnalyzer:
             # v3.1: 接ScoringEngine，用项目自身字段算模块三/四/五，杀死单位借分
             try:
                 proj_module_scores = self._score_project_modules(row, all_results, region_auth)
-                module_grid = self.run_dual_track(proj_module_scores, project_start_date=row.get("开工时间"), level="project")
+                module_grid = self.run_dual_track(
+                    proj_module_scores,
+                    project_start_date=row.get("开工时间"),
+                    level="project",
+                    project_year=int(row.get("_sign_year", 0)) or None,
+                    engineering_type=str(row.get("工程类别", "")) or None,
+                )
                 if module_grid is not None:
                     R = round(float(module_grid["r_score"]), 2)
                     r_level = int(module_grid["r_level"])
@@ -862,11 +955,19 @@ class DiscreteAnalyzer:
                 grid_strategy = veto["strategy"]
                 veto_reason = veto["veto_reason"]
 
-            # ── v2.10: 置信度 ──
+            # ── v3.2: 置信度 ──
+            # v3.2 关键修复：不再挪用模块六得分，而是直接计算项目 DMP 字段完整度
+            key_dmp_fields = ["签约额（元）", "实际完成产值", "累计收款",
+                              "一次性经营效益率（%）（A值）", "开工时间", "客户名称"]
+            field_count = sum(1 for f in key_dmp_fields
+                            if f in row and pd.notna(row.get(f)))
+            completeness = field_count / len(key_dmp_fields)
+            confidence = completeness * 100.0  # 百分制
+
+            # 仍保留模块六得分作为数据质量参考（从单位表取，但标记来源）
             module6_score = unit_mod.get("scores", {}).get("模块六_得分", 50)
-            if module6_score > 1.5:
-                module6_score = module6_score  # already 0-100
-            confidence = max(0.0, min(100.0, float(module6_score)))
+            if isinstance(module6_score, (int, float)) and module6_score > 1.5:
+                module6_score = module6_score
             conf_level = "high" if confidence >= self.conf_high else \
                          "medium" if confidence >= self.conf_medium else "low"
 
@@ -884,10 +985,11 @@ class DiscreteAnalyzer:
                 "九宫格": grid_name,
                 "处置策略": grid_strategy,
                 "网格键": grid_key,
-                # v2.10 新增
+                # v3.2: 置信度从项目字段完整度独立计算
                 "数据置信度": round(confidence, 1),
                 "置信度等级": conf_level,
-                "模块六_得分": round(confidence, 1),
+                "数据完整度_字段级": round(completeness * 100, 1),  # v3.2 新增：字段完整度
+                "模块六_得分": round(float(module6_score) if isinstance(module6_score, (int, float)) else 50, 1),
                 "一票否决原因": veto_reason,
             })
 
@@ -963,6 +1065,7 @@ class DiscreteAnalyzer:
                 "九宫格": grid_name, "处置策略": grid_strategy,
                 "网格键": grid_key,
                 "数据置信度": 50.0, "置信度等级": "medium",
+                "数据完整度_字段级": 50.0,
                 "模块六_得分": 50.0,
                 "一票否决原因": veto_reason,
             })
@@ -1336,6 +1439,8 @@ class DualTrackDiscreteAnalyzer:
         self,
         module_scores: dict[str, float],
         project_start_date: str = None,
+        project_year: int = None,
+        engineering_type: str = None,
     ) -> dict:
         """单项目九宫格分析 —— 仅使用 Project_Level 微观指标.
 
@@ -1355,6 +1460,8 @@ class DualTrackDiscreteAnalyzer:
             module_scores,
             project_start_date=project_start_date,
             level="project",
+            project_year=project_year,
+            engineering_type=engineering_type,
         )
 
         # 生成决策建议

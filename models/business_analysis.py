@@ -51,7 +51,7 @@ class BusinessHealthAnalyzer:
         # 模块三：合同质量 —— 碰了严禁底线，整个模块不该有分
         3: ["风险项目占比", "风险合同额集中度"],
         # 模块四：履约盈利 —— 停工退场是致命伤
-        4: ["停工退场率", "产值转化率"],
+        4: ["停工退场率"],
         # 模块五：资金效率 —— 资金负流是致命信号
         5: ["负流项目占比", "逾期回收率"],
         # 模块六：数据质量 —— 数据大面积缺失时信不过其他模块的分数
@@ -65,7 +65,7 @@ class BusinessHealthAnalyzer:
     # ── v2.10: 平滑插值配置 ──
     # 指标值在 [low, high] 区间内线性插值到 [score_low, score_high]
     INTERPOLATION_RULES = {
-        "产值转化率":  {"low": 0.30, "high": 0.80, "score_low": 0.40, "score_high": 1.00},
+
         "盈利健康度":  {"low": 0.00, "high": 0.80, "score_low": 0.30, "score_high": 1.00},
         "资金回收率":  {"low": 0.30, "high": 0.60, "score_low": 0.40, "score_high": 1.00},
         "区域渗透率":  {"low": 0.20, "high": 0.80, "score_low": 0.30, "score_high": 1.00},
@@ -142,9 +142,10 @@ class BusinessHealthAnalyzer:
 
         m4 = cfg.get("module_4_performance", {})
         self.W4 = {k: m4.get(k, v) for k, v in {
-            "产值转化率": 0.25, "签约履约偏差率_逆向": 0.15, "盈利健康度": 0.20,
-            "停工退场率_逆向": 0.20, "效益偏差率_逆向": 0.10, "在施项目活跃度": 0.10,
-            "低产值转化率阈值": 0.50}.items()}
+            "盈利健康度": 0.30,
+            "停工退场率_逆向": 0.30,
+            "效益偏差率_逆向": 0.20,
+            "在施项目活跃度": 0.20}.items()}
 
         m5 = cfg.get("module_5_capital", {})
         self.W5 = {k: m5.get(k, v) for k, v in {
@@ -637,10 +638,8 @@ class BusinessHealthAnalyzer:
             "合同条款不利度": round(m3.metrics.get("clause_risk_ratio", 0) * 100, 1),
             "三证合规率": round(m3.metrics.get("permit_compliance_rate", 0) * 100, 1),
 
-            # ── 模块四：履约盈利健康度（6指标）──
+            # ── 模块四：履约盈利健康度（4指标）──
             "模块四_得分": round(m4.score * 100, 1),
-            "产值转化率": round(m4.metrics["output_conversion_rate"] * 100, 1),
-            "签约履约偏差率": round(m4.metrics.get("sign_perform_deviation", 0) * 100, 1),
             "盈利健康度": round(m4.metrics["healthy_profit_ratio"] * 100, 1),
             "停工退场率": round(m4.metrics["stopped_project_ratio"] * 100, 1),
             "效益偏差率": round(m4.metrics.get("profit_deviation_ratio", 0) * 100, 1),
@@ -918,46 +917,21 @@ class BusinessHealthAnalyzer:
     # ═══════════════════════════════════════════════════════════
 
     def _module_4_performance(self, group, project_codes, issue_index, total_contract):
-        """模块四：履约盈利健康度 — 6个指标.
+        """模块四：履约盈利健康度 — 4个指标.
 
-        v2.10 数据容错防线：
-        - 聚合层严禁 abs()：total_output 直接Σ求和，正负自然相抵
-        - 材料抵消（场景A）自动抵消、退场核销（场景B/C）负向差异保留
-        - abs() 仅用于分母（签约额），防止负签约额干扰百分比计算
+        v2.10 数据容错防线：聚合层避免不合理的绝对化操作。
+        v3.x: 已剥离 产值转化率、签约履约偏差率（无可靠数据源支撑），权重转移至其余4项。
         """
-        # ① 产值转化率 —— 分子保留正负号（v2.10 关键防线）
-        total_output = group["_actual_output"].sum()  # ← 严禁 abs()！
-        total_contract_abs = group["_contract_amt"].abs().sum()  # 分母取abs是安全的
-        output_conversion_raw = total_output / total_contract_abs if total_contract_abs > 0 else 0.0
-        output_conversion_raw = max(0.0, min(output_conversion_raw, 2.0))
-        # v2.10 防线二：平滑插值
-        output_conversion = self._score_with_interpolation("产值转化率", output_conversion_raw)
-
-        # ② 签约履约偏差率（签约>12月且产值转化率<50%）
-        old_sign_mask = pd.Series(index=group.index, dtype=bool)
-        if "_sign_year" in group.columns:
-            old_sign_mask = group["_sign_year"] > 0
-        old_sign_count = old_sign_mask.sum()
-        low_output_mask = pd.Series(index=group.index, dtype=bool)
-        if old_sign_count > 0 and "_actual_output" in group.columns and "_contract_amt" in group.columns:
-            for idx in group[old_sign_mask].index:
-                out = safe_float(group.at[idx, "_actual_output"])
-                amt = safe_float(group.at[idx, "_contract_amt"])
-                rate = out / amt if amt > 0 else 0
-                if rate < self.W4["低产值转化率阈值"]:
-                    low_output_mask.at[idx] = True
-        sign_perform_deviation = low_output_mask.sum() / max(old_sign_count, 1) if old_sign_count > 0 else 0.0
-
-        # ③ 盈利健康度（A值≥底线项目占比）
+        # ① 盈利健康度（A值≥底线项目占比）
         profit_mask = group["_a_value"] > 0
         healthy_profit_ratio = profit_mask.sum() / max(len(group), 1)
 
-        # ④ 停工退场率（模型2.5标记的项目占比）
+        # ② 停工退场率（模型2.5标记的项目占比）
         m25_issues = {code for code in project_codes
                       if issue_index.get(code, {}).get("models", set()) & {"2.5"}}
         stopped_ratio = len(m25_issues) / max(len(project_codes), 1)
 
-        # ⑤ 效益偏差率（A值与实际利润率偏差>1%的项目占比，从模型2.2提取）
+        # ③ 效益偏差率（A值与实际利润率偏差>1%的项目占比，从模型2.2提取）
         m22 = self._get_model_df("2.2")
         profit_dev = 0.0
         if len(m22) > 0 and "问题分类" in m22.columns:
@@ -965,13 +939,11 @@ class BusinessHealthAnalyzer:
             dev_cats = proj_m22["问题分类"].astype(str)
             profit_dev = dev_cats.str.contains("偏差|差异", na=False).sum() / max(len(project_codes), 1)
 
-        # ⑥ 在施项目活跃度（产值>0且收款>0的项目占比）
+        # ④ 在施项目活跃度（产值>0且收款>0的项目占比）
         active_mask = (group["_actual_output"] > 0) & (group["_collection_amt"] > 0)
         active_ratio = active_mask.sum() / max(len(group), 1)
 
-        score = (min(output_conversion, 1.0) * self.W4["产值转化率"]
-                 + (1 - min(sign_perform_deviation, 1.0)) * self.W4["签约履约偏差率_逆向"]
-                 + min(healthy_profit_ratio, 1.0) * self.W4["盈利健康度"]
+        score = (min(healthy_profit_ratio, 1.0) * self.W4["盈利健康度"]
                  + (1 - min(stopped_ratio, 1.0)) * self.W4["停工退场率_逆向"]
                  + (1 - min(profit_dev, 1.0)) * self.W4["效益偏差率_逆向"]
                  + min(active_ratio, 1.0) * self.W4["在施项目活跃度"])
@@ -979,8 +951,6 @@ class BusinessHealthAnalyzer:
         return ModuleScore(
             score=max(0.0, min(1.0, score)),
             metrics={
-                "output_conversion_rate": output_conversion,
-                "sign_perform_deviation": sign_perform_deviation,
                 "healthy_profit_ratio": healthy_profit_ratio,
                 "stopped_project_ratio": stopped_ratio,
                 "profit_deviation_ratio": profit_dev,
@@ -1171,8 +1141,6 @@ class BusinessHealthAnalyzer:
             "风险项目占比": {"value": round(m3.metrics["risk_project_ratio"] * 100, 1),
                         "formula": "触碰红线/限制投标项目数 ÷ 总项目数"},
             # 模块四指标
-            "产值转化率": {"value": round(m4.metrics["output_conversion_rate"] * 100, 1),
-                       "formula": "实际完成产值 ÷ 签约额"},
             "盈利健康度": {"value": round(m4.metrics["healthy_profit_ratio"] * 100, 1),
                        "formula": "A值≥底线项目占比"},
             # 模块五指标
@@ -1204,6 +1172,7 @@ class BusinessHealthAnalyzer:
     # ── 趋势 / 重点项目 / 建议 ──────────────────────────────
 
     def _build_trends(self, df: pd.DataFrame) -> list[dict]:
+        """v3.2: 年度趋势 + 同比增速 + 异常标记."""
         if "_sign_year" not in df.columns:
             return []
         valid = df[df["_sign_year"] > 0].copy()
@@ -1212,16 +1181,48 @@ class BusinessHealthAnalyzer:
         rows = []
         for year, group in valid.groupby("_sign_year"):
             contract = group["_contract_amt"].sum()
-            output = group["_actual_output"].sum()
             collection = group["_collection_amt"].sum()
             rows.append({
                 "year": int(year),
                 "project_count": int(len(group)),
                 "contract_yi": round(contract / 1e8, 2),
-                "output_conversion_rate": round((output / contract * 100) if contract > 0 else 0.0, 1),
                 "collection_rate": round((collection / contract * 100) if contract > 0 else 0.0, 1),
             })
-        return sorted(rows, key=lambda x: x["year"])
+        rows = sorted(rows, key=lambda x: x["year"])
+
+        # v3.2: 计算同比增速与异常标记
+        for i, row in enumerate(rows):
+            if i == 0:
+                row["contract_growth"] = None
+                row["conversion_change"] = None
+                row["collection_change"] = None
+                row["anomaly"] = "基准年（无同比数据）"
+                continue
+
+            prev = rows[i - 1]
+            # 合同额增速
+            if prev["contract_yi"] > 0:
+                row["contract_growth"] = round(
+                    (row["contract_yi"] - prev["contract_yi"]) / prev["contract_yi"] * 100, 1)
+            else:
+                row["contract_growth"] = None
+
+            # 收款率变化（百分点）
+            row["collection_change"] = round(
+                row["collection_rate"] - prev["collection_rate"], 1)
+
+            # 异常判断
+            anomalies = []
+            if row.get("contract_growth") is not None:
+                if row["contract_growth"] < -30:
+                    anomalies.append("⚠️ 签约额骤降 >30%")
+                elif row["contract_growth"] > 80:
+                    anomalies.append("⚠️ 签约额暴涨 >80%（可能透支未来产能）")
+            if row["collection_change"] < -10:
+                anomalies.append("🔴 收款率骤降")
+            row["anomaly"] = " | ".join(anomalies) if anomalies else "稳定"
+
+        return rows
 
     def _build_quarter_trends(self, df: pd.DataFrame, issue_index: dict) -> list[dict]:
         if "_sign_year" not in df.columns or "_sign_quarter" not in df.columns:
@@ -1249,7 +1250,6 @@ class BusinessHealthAnalyzer:
                 "project_count": int(len(group)),
                 "contract_yi": round(contract / 1e8, 2),
                 "total_score": score,
-                "output_conversion_rate": round((output / contract * 100) if contract > 0 else 0.0, 1),
                 "collection_rate": round((collection / contract * 100) if contract > 0 else 0.0, 1),
             })
         return rows
@@ -1401,7 +1401,7 @@ def _business_module_detail_stable(business_result: dict, module_id: int) -> dic
         1: ["区域渗透率", "跨区域经营指数", "深耕区域集中度", "区域合同额强度", "业务结构偏离度", "EPC转型进度"],
         2: ["客户稳定性指数", "客户产出波动率", "客户集中度风险", "中标转化率", "新客户质量指数", "战略客户产出比"],
         3: ["风险项目占比", "风险合同额集中度", "付款条件优良率", "合同条款不利度", "三证合规率"],
-        4: ["产值转化率", "签约履约偏差率", "盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
+        4: ["盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
         5: ["资金占用率", "保证金周转天数", "逾期回收率", "预收款缺口率", "负流项目占比"],
         6: ["数据完整率", "流程合规率", "中标签约偏差率", "测算规律性指数", "签约延迟率"],
     }
@@ -1516,7 +1516,7 @@ def extract_module_data(business_result: dict, module_id: int) -> dict:
         1: ["区域渗透率", "跨区域经营指数", "深耕区域集中度", "区域合同额强度", "业务结构偏离度", "EPC转型进度"],
         2: ["客户稳定性指数", "客户产出波动率", "客户集中度风险", "中标转化率", "新客户质量指数", "战略客户产出比"],
         3: ["风险项目占比", "风险合同额集中度", "付款条件优良率", "合同条款不利度", "三证合规率"],
-        4: ["产值转化率", "签约履约偏差率", "盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
+        4: ["盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
         5: ["资金占用率", "保证金周转天数", "逾期回收率", "预收款缺口率", "负流项目占比"],
         6: ["数据完整率", "流程合规率", "中标签约偏差率", "测算规律性指数", "签约延迟率"],
     }
