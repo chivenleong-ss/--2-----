@@ -152,7 +152,7 @@ class AuditConclusion:
             reasons.append(f"综合得分 {total_score:.1f} 处于全局稳健区 ({self.GLOBAL_STEADY}-{self.GLOBAL_STRONG})")
             triggers.append("global_steady")
 
-            if ["high_dispersion", "weakest_module_warning", "falling_trend"]:
+            if triggers:  # 有分化或其他负面信号
                 return self._verdict("附条件通过", reasons, confidence,
                     "整体可控但存在短板/分化/下滑趋势，建议针对性提升",
                     triggers)
@@ -326,23 +326,65 @@ class AuditConclusion:
     # ── 批量方法 ──
 
     def batch_assess_units(self, units: list[dict]) -> list[dict]:
-        """批量审计单位，返回带结论的单位列表."""
+        """v4.0: 批量审计单位，传递全量参数到 assess_unit."""
         results = []
         for u in units:
-            verdict = self.assess_scope(
-                scope_name=u.get("名称", u.get("申报单位", "未知")),
+            verdict = self.assess_unit(
                 total_score=u.get("综合得分", 0),
                 module_scores={k: u.get(k, 0) for k in
                     ["模块一_得分", "模块二_得分", "模块三_得分", "模块四_得分", "模块五_得分", "模块六_得分"]
                 },
                 veto_triggered=u.get("红线触发", False),
+                contract_veto=u.get("一票否决原因", "") != "",
                 confidence=u.get("平均置信度", u.get("数据置信度", 80)),
-                secondary_unit_type=u.get("单位类型"),
+                internal_dispersion=u.get("内部分化度R", 0),
+                high_risk_ratio=u.get("淘汰整顿区占比", u.get("淘汰区占比", 0)),
+                weakest_modules=sorted(
+                    [(f"模块{i+1}", u.get(f"模块{i+1}_得分", 50)) for i in range(6)],
+                    key=lambda x: x[1]
+                )[:1] if any(u.get(f"模块{i}_得分") for i in range(1, 7)) else None,
+                score_trend=u.get("趋势"),
             )
             results.append({**u, "审计意见": verdict})
         return results
 
     # ── 内部方法 ──
+
+    def conclusion_report(self, unit_name: str, verdict: dict, detail: dict = None) -> str:
+        """v4.0: 生成格式化的审计结论文本.
+
+        Args:
+            unit_name: 单位名称
+            verdict: assess_unit / assess_scope 的返回 dict
+            detail: 可选的模块分项详情
+
+        Returns:
+            格式化审计结论字符串
+        """
+        lines = []
+        lines.append(f"══════════════════════════════════════")
+        lines.append(f"  审计结论：{unit_name}")
+        lines.append(f"══════════════════════════════════════")
+        lines.append(f"")
+        lines.append(f"  意见：{verdict['opinion']}")
+        lines.append(f"  置信度：{verdict['confidence']}（{verdict['confidence_score']:.0f}分）")
+        lines.append(f"  判定理由：{verdict['reason']}")
+        lines.append(f"  行动建议：{verdict['action']}")
+        lines.append(f"")
+        if verdict.get('triggers'):
+            lines.append(f"  触发条件：{', '.join(verdict['triggers'])}")
+            lines.append(f"")
+
+        if detail:
+            lines.append(f"  ── 模块分项 ──")
+            for mod, score in sorted(detail.items(), key=lambda x: x[1]):
+                bar = "█" * int(score / 5) + "░" * (20 - int(score / 5))
+                tag = "强势" if score >= 80 else ("稳健" if score >= 65 else "承压")
+                lines.append(f"  {mod}: {score:5.1f} [{bar}] {tag}")
+            lines.append(f"")
+
+        lines.append(f"══════════════════════════════════════")
+        return "\n".join(lines)
 
     def _verdict(self, opinion, reasons, confidence, action, triggers=None) -> dict:
         """构建统一意见结构."""

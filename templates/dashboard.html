@@ -35,25 +35,25 @@
             <div class="run-status" id="prefilterStatus">请先上传全部必传文件，再运行前置过滤层。</div>
             <div class="prefilter-metrics" id="prefilterMetrics" hidden>
                 <div class="summary-grid">
-                    <article class="kpi-card kpi-hero">
-                        <span><i class="bi bi-shield-exclamation"></i> 未开工剔除</span>
-                        <strong id="pfExcludedCount">0</strong>
-                        <em>项</em>
-                    </article>
                     <article class="kpi-card kpi-blue">
                         <span>过滤前项目数</span>
                         <strong id="pfBeforeCount">0</strong>
                         <em>DMP签约报量全量</em>
                     </article>
-                    <article class="kpi-card kpi-green">
-                        <span>过滤后项目数</span>
-                        <strong id="pfAfterCount">0</strong>
-                        <em>进入审计模型的有效盘</em>
+                    <article class="kpi-card kpi-hero">
+                        <span><i class="bi bi-shield-exclamation"></i> 未开工剔除</span>
+                        <strong id="pfExcludedCount">0</strong>
+                        <em>项</em>
                     </article>
                     <article class="kpi-card kpi-amber">
                         <span>停工 / 退场 / 停缓建</span>
                         <strong id="pfStoppedCount">0</strong>
-                        <em>保留供模型2.2盈利分析</em>
+                        <em>保留供2.2盈利分析</em>
+                    </article>
+                    <article class="kpi-card kpi-green">
+                        <span>过滤后项目数</span>
+                        <strong id="pfAfterCount">0</strong>
+                        <em>进入审计模型的有效盘</em>
                     </article>
                 </div>
             </div>
@@ -103,48 +103,62 @@
         </div>
 
         {% set dims = [
-            ("维度一：战略与布局", ["1.1", "1.2", "1.3", "1.4"]),
-            ("维度二：合同质量与风险", ["2.1", "2.2", "2.3", "2.4", "2.5"]),
-            ("维度三：客户健康度", ["3.1", "3.2"])
+            ("维度一：战略与布局", [
+                {"id": 1, "name": "模块一：区域布局", "models": ["1.1", "1.2"], "indicators": ["跨区域经营合规", "区域覆盖质量", "业务结构偏离", "EPC转型进度", "战略新兴业务缺口", "区域发展偏离"], "redline": [True, False, False, False, False, False]},
+                {"id": 6, "name": "模块六：数据质量", "models": ["1.4"], "indicators": ["流程时间倒置", "利润率规律异常", "中标签约金额偏离", "签约逾期", "凑量嫌疑", "邀请招标比例过高"], "redline": [True, True, False, False, False, False]},
+            ]),
+            ("维度二：合同质量与风险", [
+                {"id": 3, "name": "模块三：合同质量", "models": ["2.1", "2.4"], "indicators": ["严禁投标红线集", "限制投标风险", "付款条件校验", "无限责任条款", "放弃优先受偿权", "停缓建不利", "三证不全", "质保金偏高"], "redline": [True, False, False, True, True, True, True, False]},
+                {"id": 4, "name": "模块四：履约盈利", "models": ["2.2", "2.5"], "indicators": ["A值底部亏损", "效益偏差", "施工真实性异常", "签约履约偏差"], "redline": [True, False, True, True]},
+                {"id": 5, "name": "模块五：资金效率", "models": ["2.3"], "indicators": ["现金保证金占用", "资金逾期回收", "联合体超额担保", "资金负流"], "redline": [False, True, True, True]},
+            ]),
+            ("维度三：客户健康度", [
+                {"id": 2, "name": "模块二：客户稳定", "models": ["1.3", "3.1", "3.2", "3.3"], "indicators": ["客户集中度综合", "战略客户管理", "优质客户占比", "中标转化异常", "客户活跃度异常", "新客户结构质量", "僵尸客户内控核查"], "redline": [False, False, False, False, True, False, False]},
+            ]),
         ] %}
 
         <div id="modelSelectionArea">
-            {% for dim_label, dim_models in dims %}
+            {% for dim_label, modules in dims %}
             <div class="model-category">
                 <div class="category-head">
                     <span class="category-bar"></span>
                     <span class="category-label">{{ dim_label }}</span>
                 </div>
-                <div class="model-card-grid">
-                    {% for mid in dim_models %}
-                    <label class="model-card-item selected" id="mcard-{{ mid }}" data-model-id="{{ mid }}">
-                        <div class="model-card-main">
-                            <div class="model-card-hero">
-                                <div class="model-card-icon-shell">
-                                    <div class="model-card-icon-box">
-                                        <i class="bi bi-box-seam-fill model-card-icon" id="model-icon-{{ mid }}"></i>
-                                    </div>
+                <div class="module-card-grid">
+                    {% for mod in modules %}
+                    <div class="module-exec-card selected" id="modcard-{{ mod.id }}" data-module-id="{{ mod.id }}" data-models='{{ mod.models | tojson }}'>
+                        <div class="module-exec-head">
+                            <div class="module-exec-left">
+                                <input type="checkbox" class="module-check" checked onchange="onModuleToggle(this)" data-module-id="{{ mod.id }}">
+                                <span class="module-exec-num">{{ mod.id }}</span>
+                                <span class="module-exec-name">{{ mod.name.replace('模块一：', '').replace('模块二：', '').replace('模块三：', '').replace('模块四：', '').replace('模块五：', '').replace('模块六：', '') }}</span>
+                            </div>
+                            <div class="module-exec-right" onclick="toggleModuleCard(this)" style="cursor:pointer;">
+                                <span class="module-exec-model-count">{{ mod.indicators|length }}个指标</span>
+                                <span class="module-exec-agg"></span>
+                                <i class="bi bi-chevron-down module-exec-chevron"></i>
+                            </div>
+                        </div>
+                        <div class="module-exec-body" hidden>
+                            <div class="module-exec-models">
+                                {% for mid in mod.models %}
+                                <span class="sub-model-item" id="sm-{{ mid }}">
+                                    <span class="sub-model-code">{{ models[mid].display_id or mid }}</span>
+                                    <span class="sub-model-name">{{ models[mid].name }}</span>
+                                    <span class="sub-model-risk" id="sub-risk-{{ mid }}"></span>
+                                </span>
+                                {% endfor %}
+                            </div>
+                            <div class="module-exec-indicators">
+                                <span class="indicator-label">合并指标（{{ mod.indicators|length }}个）:</span>
+                                <div class="indicator-chips">
+                                    {% for ind in mod.indicators %}
+                                    <span class="ind-chip {{ 'ind-redline' if mod.redline[loop.index0] else '' }}">{{ ind }}</span>
+                                    {% endfor %}
                                 </div>
                             </div>
-                            <div class="model-card-info">
-                                <span class="model-card-code">{{ mid }}</span>
-                                <span class="model-card-desc">{{ models[mid].name }}</span>
-                            </div>
                         </div>
-                        <div class="model-card-risk" id="risk-{{ mid }}" aria-hidden="true">
-                            <span class="risk-line risk-line-red" id="risk-line-red-{{ mid }}" hidden>
-                                <i class="bi bi-exclamation-octagon-fill"></i>
-                                <strong id="risk-red-{{ mid }}">0</strong>
-                                <em>重大风险</em>
-                            </span>
-                            <span class="risk-line risk-line-yellow" id="risk-line-yellow-{{ mid }}" hidden>
-                                <i class="bi bi-exclamation-circle-fill"></i>
-                                <strong id="risk-yellow-{{ mid }}">0</strong>
-                                <em>预警</em>
-                            </span>
-                        </div>
-                        <input type="checkbox" class="model-check" value="{{ mid }}" checked>
-                    </label>
+                    </div>
                     {% endfor %}
                 </div>
             </div>
@@ -155,8 +169,9 @@
             <div>
                 <div id="runStatus" class="run-status">请先上传必传文件并运行前置过滤层。</div>
                 <div id="strategicScopeHint" class="strategic-scope-hint">
+                    <i class="bi bi-info-circle-fill" style="color:#0284C7;font-size:18px;flex-shrink:0;"></i>
                     <span class="scope-badge">战略规划口径</span>
-                    <span id="strategicScopeText">上传必传文件后自动识别</span>
+                    <span id="strategicScopeText">请先上传必传文件，系统将自动识别并匹配对应口径。</span>
                 </div>
             </div>
         </div>
@@ -167,6 +182,7 @@
                 跨区域经营风险-收益评估
             </a>
         </div>
+
     </section>
 </div>
 
@@ -218,7 +234,7 @@ if (!slots.qcc_risk) {
         required: false
     };
 } else {
-    slots.qcc_risk.label = "企业信息（企查查）";
+    slots.qcc_risk.label = "企业信息";
     slots.qcc_risk.desc = "企查查导出的风险排查表";
     slots.qcc_risk.required = false;
 }
@@ -287,7 +303,131 @@ function formatFileSize(size) {
 }
 
 function getSelectedModels() {
-    return Array.from(document.querySelectorAll(".model-check:checked")).map((el) => el.value);
+    // 从已选模块卡片解析底层模型列表
+    const modelSet = new Set();
+    document.querySelectorAll(".module-exec-card.selected .module-check:checked").forEach((cb) => {
+        const card = cb.closest(".module-exec-card");
+        if (!card) return;
+        try {
+            const models = JSON.parse(card.dataset.models || "[]");
+            models.forEach((m) => modelSet.add(m));
+        } catch (e) { /* ignore */ }
+    });
+    return Array.from(modelSet);
+}
+
+function onModuleToggle(checkbox) {
+    const card = checkbox.closest(".module-exec-card");
+    if (!card) return;
+    card.classList.toggle("selected", checkbox.checked);
+    card.classList.remove("partial");
+    updateRunButton();
+}
+
+function syncModuleCheckbox(card) {
+    const moduleToggle = card.querySelector(".module-toggle-check");
+    const checks = Array.from(card.querySelectorAll(".model-check"));
+    if (!moduleToggle || !checks.length) return;
+    const checkedCount = checks.filter((cb) => cb.checked).length;
+    moduleToggle.checked = checkedCount > 0;
+    moduleToggle.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+}
+
+function setModuleSelection(card, checked) {
+    card.querySelectorAll(".model-check").forEach((cb) => {
+        cb.checked = checked;
+    });
+    card.querySelectorAll(".sub-model-item").forEach((item) => {
+        item.classList.toggle("selected", checked);
+    });
+    syncModuleCheckbox(card);
+}
+
+function toggleModuleCard(el) {
+    const card = el.closest(".module-exec-card");
+    if (!card) return;
+    const body = card.querySelector(".module-exec-body");
+    if (!body) return;
+    body.hidden = !body.hidden;
+    card.classList.toggle("expanded", !body.hidden);
+    const chevron = card.querySelector(".module-exec-chevron");
+    if (chevron) chevron.style.transform = body.hidden ? "" : "rotate(180deg)";
+}
+
+function buildReadinessBanner() {
+    const runBarHost = document.querySelector(".run-bar > div") || document.querySelector(".run-bar");
+    if (!runBarHost || byId("readinessBanner")) return;
+    const banner = document.createElement("div");
+    banner.id = "readinessBanner";
+    banner.className = "readiness-banner";
+    banner.innerHTML = `
+        <div class="readiness-banner-icon"><i class="bi bi-info-circle-fill"></i></div>
+        <div class="readiness-banner-copy">
+            <strong>数据就绪度校验</strong>
+            <span>请先在作业台完成基础文件上传，系统将自动识别战略规划口径。</span>
+        </div>
+    `;
+    const scopeHint = byId("strategicScopeHint");
+    runBarHost.insertBefore(banner, scopeHint || null);
+    runBarHost.classList.add("run-feedback");
+}
+
+function rebuildModelExecutionUI() {
+    byId("selectAllBtn")?.classList.add("ghost-btn");
+    byId("clearAllBtn")?.classList.add("ghost-btn");
+    buildReadinessBanner();
+    document.querySelectorAll(".category-bar").forEach((bar) => bar.remove());
+
+    document.querySelectorAll(".module-exec-card").forEach((card) => {
+        const head = card.querySelector(".module-exec-head");
+        const left = card.querySelector(".module-exec-left");
+        const right = card.querySelector(".module-exec-right");
+        const body = card.querySelector(".module-exec-body");
+        card.querySelector(".module-exec-num")?.remove();
+        if (!head || !left || !right || !body || card.querySelector(".module-toggle-check")) {
+            syncModuleCheckbox(card);
+            return;
+        }
+
+        head.removeAttribute("onclick");
+
+        const moduleId = card.dataset.moduleId || "";
+        const selectZone = document.createElement("label");
+        selectZone.className = "module-select-zone";
+        selectZone.setAttribute("for", `module-toggle-${moduleId}`);
+
+        const moduleToggle = document.createElement("input");
+        moduleToggle.type = "checkbox";
+        moduleToggle.className = "module-toggle-check";
+        moduleToggle.id = `module-toggle-${moduleId}`;
+
+        const leftClone = left.cloneNode(true);
+        selectZone.append(moduleToggle, leftClone);
+
+        const expandBtn = document.createElement("button");
+        expandBtn.type = "button";
+        expandBtn.className = "module-expand-zone";
+        expandBtn.setAttribute("aria-expanded", "false");
+        if (!body.id) body.id = `modbody-${moduleId}`;
+        expandBtn.setAttribute("aria-controls", body.id);
+
+        while (right.firstChild) {
+            expandBtn.appendChild(right.firstChild);
+        }
+
+        head.innerHTML = "";
+        head.append(selectZone, expandBtn);
+        right.remove();
+        left.remove();
+
+        expandBtn.addEventListener("click", () => toggleModuleCardByCard(card));
+        moduleToggle.addEventListener("change", () => {
+            setModuleSelection(card, moduleToggle.checked);
+            updateModuleCardState();
+        });
+
+        syncModuleCheckbox(card);
+    });
 }
 
 function hasRequiredUploads() {
@@ -321,6 +461,11 @@ function markSlotPending(key) {
     }
 }
 
+function resetLocalUploadState() {
+    uploadedFiles = {};
+    Object.keys(slots || {}).forEach(markSlotPending);
+}
+
 function markSlotUploaded(key, filename, size) {
     const slot = byId(`slot-${key}`);
     const fileLine = byId(`fileline-${key}`);
@@ -340,11 +485,13 @@ function markSlotUploaded(key, filename, size) {
 
 async function checkUploaded() {
     try {
-        Object.keys(slots).forEach(markSlotPending);
+        resetLocalUploadState();
         const response = await fetch("/api/uploaded-files", { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok) {
+            backendUploadsReady = false;
+            return;
+        }
         const payload = await response.json();
-        uploadedFiles = {};
         Object.entries(payload || {}).forEach(([key, info]) => {
             const fileInfo = info?.file;
             if (!info || !info.uploaded || !fileInfo) return;
@@ -568,37 +715,58 @@ function renderProjectList(listId, emptyId, toggleId, items, type) {
 
 function renderModelRiskStats(stats) {
     const models = Array.isArray(stats?.models) ? stats.models : [];
-    resultsReady = models.some((model) => Number(model.total || 0) > 0);
+    resultsReady = models.some((m) => Number(m.total || 0) > 0);
     byId("reportCta").hidden = !resultsReady;
 
     const selectionArea = byId("modelSelectionArea");
     if (resultsReady) selectionArea?.classList.add("results-mode");
     else selectionArea?.classList.remove("results-mode");
 
-    document.querySelectorAll(".model-card-item").forEach((card) => {
-        const modelId = card.dataset.modelId;
-        const modelStats = models.find((item) => item.id === modelId);
+    // Update sub-model risk badges
+    models.forEach((modelStats) => {
+        const mid = modelStats.id;
         const red = Number(modelStats?.red || 0);
         const yellow = Number(modelStats?.yellow || 0);
         const total = Number(modelStats?.total || 0);
-
-        byId(`risk-red-${modelId}`).textContent = String(red);
-        byId(`risk-yellow-${modelId}`).textContent = String(yellow);
-        byId(`risk-line-red-${modelId}`).hidden = red === 0;
-        byId(`risk-line-yellow-${modelId}`).hidden = yellow === 0;
-
-        const icon = byId(`model-icon-${modelId}`);
-        if (icon) {
-            icon.className = "bi model-card-icon";
-            if (red > 0) icon.classList.add("bi-exclamation-triangle-fill");
-            else if (yellow > 0) icon.classList.add("bi-exclamation-diamond-fill");
-            else if (total > 0) icon.classList.add("bi-shield-check");
-            else icon.classList.add("bi-shield");
+        const subEl = byId(`sub-risk-${mid}`);
+        if (subEl) {
+            subEl.innerHTML = "";
+            if (red > 0) subEl.innerHTML += `<span class="badge-red">${red}⚠</span>`;
+            if (yellow > 0) subEl.innerHTML += `<span class="badge-yellow">${yellow}</span>`;
+            if (total > 0 && red === 0 && yellow === 0) subEl.innerHTML = `<span class="badge-clean">✓</span>`;
         }
+        // Update sub-model item class
+        const smEl = document.getElementById(`sm-${mid}`);
+        if (smEl) {
+            smEl.classList.toggle("has-red", red > 0);
+            smEl.classList.toggle("has-yellow", red === 0 && yellow > 0);
+            smEl.classList.toggle("is-clean", total > 0 && red === 0 && yellow === 0);
+        }
+    });
 
-        card.classList.toggle("has-red", red > 0);
-        card.classList.toggle("has-yellow", red === 0 && yellow > 0);
-        card.classList.toggle("is-clean", total > 0 && red === 0 && yellow === 0);
+    // Aggregate module-level stats (use data-models attribute)
+    document.querySelectorAll(".module-exec-card").forEach((card) => {
+        let cardModelIds = [];
+        try { cardModelIds = JSON.parse(card.dataset.models || "[]"); } catch (e) { /* ignore */ }
+        let totalRed = 0, totalYellow = 0, totalIssues = 0;
+        cardModelIds.forEach((mid) => {
+            const m = models.find((x) => x.id === mid);
+            if (m) { totalRed += Number(m.red || 0); totalYellow += Number(m.yellow || 0); totalIssues += Number(m.total || 0); }
+        });
+        // Update module card visual
+        card.classList.toggle("has-red", totalRed > 0);
+        card.classList.toggle("has-yellow", totalRed === 0 && totalYellow > 0);
+        card.classList.toggle("is-clean", totalIssues > 0 && totalRed === 0 && totalYellow === 0);
+        // Show aggregate count on module head
+        let countEl = card.querySelector(".module-exec-agg");
+        if (!countEl) {
+            countEl = document.createElement("span");
+            countEl.className = "module-exec-agg";
+            card.querySelector(".module-exec-right")?.appendChild(countEl);
+        }
+        countEl.innerHTML = totalIssues > 0
+            ? (totalRed > 0 ? `<span class="badge-red">${totalRed}⚠</span>` : "") + (totalYellow > 0 ? `<span class="badge-yellow">${totalYellow}</span>` : "")
+            : "";
     });
 }
 
@@ -621,6 +789,13 @@ async function resetPageSession() {
             body: JSON.stringify({ clear_uploads: true })
         });
         if (response.ok) {
+            resetLocalUploadState();
+            latestPrefilterSummary = null;
+            resultsReady = false;
+            backendUploadsReady = false;
+            lastPipelineError = null;
+            renderPrefilterSummary();
+            renderModelRiskStats({});
             return;
         }
     } catch (error) {
@@ -652,6 +827,9 @@ function shouldResetOnLoad() {
 
     const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
     const navigationType = navigationEntry?.type || "";
+    if (navigationType === "reload") {
+        return true;
+    }
     const cameFromInternalHomeLink = Boolean(
         marker
         && marker.path === "/"
@@ -721,15 +899,49 @@ function updateRunButton() {
         if (lastPipelineError) runStatus.textContent = lastPipelineError;
         else if (pipelineState === "running" && currentPollMode === "full") runStatus.textContent = "正在穿透审计中...";
         else if (pipelineState === "running" && currentPollMode === "prefilter") runStatus.textContent = "前置过滤运行中...";
-        else if (!hasRequiredUploads()) runStatus.textContent = "请先上传必传文件。";
+        else if (!hasRequiredUploads()) runStatus.textContent = "";
         else if (!hasPrefilterResults(latestPrefilterSummary)) runStatus.textContent = "请先运行前置过滤层。";
         else if (!selectedCount) runStatus.textContent = "请至少勾选一个模型。";
         else runStatus.textContent = "已满足运行条件，可以开始穿透审计。";
     }
 }
 
+updateRunButton = function () {
+    const runBtn = byId("runBtn");
+    const prefilterBtn = byId("prefilterBtn");
+    const runStatus = byId("runStatus");
+    const prefilterStatus = byId("prefilterStatus");
+    const readinessBanner = byId("readinessBanner");
+    const selectedCount = getSelectedModels().length;
+    const uploadsReady = hasRequiredUploads();
+    const prefilterReady = hasPrefilterResults(latestPrefilterSummary);
+
+    if (prefilterBtn) prefilterBtn.disabled = pipelineState === "running";
+    if (runBtn) runBtn.disabled = pipelineState === "running" || !uploadsReady || !prefilterReady || selectedCount === 0;
+    if (readinessBanner) readinessBanner.hidden = uploadsReady;
+
+    if (prefilterStatus) {
+        if (lastPipelineError) prefilterStatus.textContent = lastPipelineError;
+        else if (pipelineState === "running" && currentPollMode === "prefilter") prefilterStatus.textContent = "前置过滤层运行中...";
+        else if (!uploadsReady) prefilterStatus.textContent = "请先上传全部必传文件，再运行前置过滤层。";
+        else if (prefilterReady) prefilterStatus.textContent = "前置过滤层已完成，可以开始穿透审计。";
+        else prefilterStatus.textContent = "文件已齐备，可以运行前置过滤层。";
+    }
+
+    if (runStatus) {
+        if (lastPipelineError) runStatus.textContent = lastPipelineError;
+        else if (pipelineState === "running" && currentPollMode === "full") runStatus.textContent = "正在穿透审计中...";
+        else if (pipelineState === "running" && currentPollMode === "prefilter") runStatus.textContent = "前置过滤层运行中...";
+        else if (!uploadsReady) runStatus.textContent = "";
+        else if (!prefilterReady) runStatus.textContent = "请先运行前置过滤层。";
+        else if (!selectedCount) runStatus.textContent = "请至少勾选一个模型。";
+        else runStatus.textContent = "已满足运行条件，可以开始穿透审计。";
+    }
+};
+
 document.addEventListener("DOMContentLoaded", async () => {
     renderUploadSlots();
+    resetLocalUploadState();
     byId("batchUploadBtn").addEventListener("click", () => byId("batchFileInput").click());
     byId("batchFileInput").addEventListener("change", async (event) => {
         await uploadBatchFiles(event.target.files);
@@ -745,28 +957,39 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
     });
 
-    document.querySelectorAll(".model-check").forEach((checkbox) => {
-        checkbox.addEventListener("change", () => {
-            checkbox.closest(".model-card-item")?.classList.toggle("selected", checkbox.checked);
-            updateRunButton();
-        });
+    // Module checkbox listeners
+    document.querySelectorAll(".module-check").forEach((cb) => {
+        cb.addEventListener("change", () => onModuleToggle(cb));
     });
 
     byId("selectAllBtn").addEventListener("click", () => {
-        document.querySelectorAll(".model-check").forEach((checkbox) => {
-            checkbox.checked = true;
-            checkbox.closest(".model-card-item")?.classList.add("selected");
+        document.querySelectorAll(".module-check").forEach((cb) => { cb.checked = true; });
+        document.querySelectorAll(".module-exec-card").forEach((el) => {
+            el.classList.add("selected");
+            el.classList.remove("unselected", "partial");
         });
         updateRunButton();
     });
 
     byId("clearAllBtn").addEventListener("click", () => {
-        document.querySelectorAll(".model-check").forEach((checkbox) => {
-            checkbox.checked = false;
-            checkbox.closest(".model-card-item")?.classList.remove("selected");
+        document.querySelectorAll(".module-check").forEach((cb) => { cb.checked = false; });
+        document.querySelectorAll(".module-exec-card").forEach((el) => {
+            el.classList.remove("selected");
+            el.classList.add("unselected");
         });
         updateRunButton();
     });
+
+    function updateModuleCardState() {
+        document.querySelectorAll(".module-exec-card").forEach((card) => {
+            const cb = card.querySelector(".module-check");
+            const checked = cb ? cb.checked : false;
+            card.classList.toggle("selected", checked);
+            card.classList.toggle("unselected", !checked);
+            card.classList.remove("partial");
+        });
+        updateRunButton();
+    }
 
     byId("toggleUnstartedBtn").addEventListener("click", () => {
         const btn = byId("toggleUnstartedBtn");
@@ -844,42 +1067,194 @@ document.addEventListener("DOMContentLoaded", async () => {
 .upload-panel, .action-panel, .model-board { display: flex; flex-direction: column; }
 .action-panel > :not(.panel-head) { padding: 0 18px 18px; }
 .upload-panel > :not(.panel-head) { padding: 0 18px 18px; }
-.model-board .panel-head { padding-bottom: 10px; }
+.model-board .panel-head { padding-bottom: 18px; }
 .model-board .model-category { padding: 0 18px; }
-.model-board .run-bar { margin: 0 18px; }
+.model-board .run-bar { margin: 12px 18px 10px; }
 .model-board .report-cta-wrap { margin: 0 18px 16px; }
 .panel-head, .model-board-head, .run-bar, .model-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.run-bar > div { min-width: 0; }
 .panel-head { padding: 16px 18px; border-bottom: 1px solid rgba(237, 242, 247, 0.6); }
 .panel-head h2 { margin: 6px 0 0; color: #143a61; font-size: 18px; line-height: 1.2; font-weight: 800; }
 .eyebrow { display: inline-block; color: #2782d6; font-size: 11px; font-weight: 800; letter-spacing: 0.16em; }
-.category-bar { width: 4px; height: 18px; border-radius: 999px; background: #1f89df; flex-shrink: 0; }
-.category-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.section-desc, .batch-upload-tip, .run-status { margin: 0; color: #5e7388; font-size: 13px; }
-.strategic-scope-hint {
-    margin-top: 8px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    background: linear-gradient(90deg, #e8f0ff 0%, #f4f7ff 100%);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+.category-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    color: #49627e;
-    font-size: 12px;
-    line-height: 1.55;
+    gap: 8px;
+    margin-bottom: 20px;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+.category-label {
+    color: #1E293B;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.25;
+}
+/* v4.0 模块映射标签 */
+.module-map-hint { font-size: 11px; color: #5e7388; font-weight: 500; margin-left: 4px; }
+.module-detail-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding-left: 12px; }
+.module-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: rgba(31,137,223,0.08); color: #1f89df; border: 1px solid rgba(31,137,223,0.2); }
+/* v4.0 六模块卡片 */
+.module-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.module-exec-card {
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(226, 232, 240, 0.6);
+    border-radius: 16px;
+    overflow: hidden;
+    padding: 0;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.module-exec-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 26px -6px rgba(15, 23, 42, 0.06);
+}
+.module-exec-card.has-red { border-color: rgba(203,91,75,0.4); }
+.module-exec-card.has-yellow { border-color: rgba(201,149,24,0.4); }
+.module-exec-card.is-clean { border-color: rgba(47,143,97,0.3); }
+.module-exec-card.partial { border-color: rgba(201,149,24,0.32); }
+.module-exec-card.selected { border-color: rgba(59, 130, 246, 0.28); }
+.module-exec-card.expanded { background: rgba(255, 255, 255, 0.78); }
+.module-exec-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 88px; user-select: none; padding: 20px 24px; }
+.module-select-zone,
+.module-expand-zone {
+    border: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    padding: 0;
+}
+.module-select-zone {
+    gap: 12px;
+    cursor: pointer;
+    min-width: 0;
+}
+.module-expand-zone {
+    gap: 8px;
+    cursor: pointer;
+    color: #94A3B8;
+    border-left: 0;
+    justify-content: flex-end;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+.module-expand-zone:hover { background: rgba(148, 163, 184, 0.05); color: #64748b; }
+.module-expand-zone[aria-expanded="true"] .module-exec-chevron { transform: rotate(180deg); }
+.module-toggle-check {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: #2563eb;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.module-exec-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.module-exec-num { display: none !important; }
+.module-exec-name { font-weight: 700; font-size: 15px; color: #143a61; min-width: 0; }
+.module-exec-model-count {
+    font-size: 11px;
+    color: #94A3B8;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    white-space: nowrap;
     font-weight: 600;
+}
+.module-exec-toggle { font-size: 11px; color: #5e7388; }
+.module-exec-agg { display: flex; align-items: center; gap: 6px; }
+.module-exec-chevron { transition: transform 0.2s ease; font-size: 14px; }
+.module-exec-body { padding: 0 24px 20px; border-top: 1px dashed #E2E8F0; }
+.module-exec-body-inner { padding-top: 14px; }
+.module-exec-models { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sub-model-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 12px;
+    border: 1px solid transparent;
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+.sub-model-item:hover { background: rgba(237,242,247,0.5); border-color: rgba(226, 232, 240, 0.85); }
+.sub-model-item.has-red { background: rgba(203,91,75,0.06); }
+.sub-model-item.has-yellow { background: rgba(201,149,24,0.06); }
+.sub-model-item.is-clean { background: rgba(47,143,97,0.04); }
+.sub-model-code { font-weight: 700; color: #37464f; min-width: 28px; }
+.sub-model-name { color: #5e7388; flex: 1; }
+.sub-model-risk { display: flex; align-items: center; gap: 6px; }
+.badge-red { background: #cb5b4b; color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 12px; font-weight: 700; line-height: 1.2; }
+.badge-yellow { background: #c99518; color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 12px; font-weight: 700; line-height: 1.2; }
+.badge-clean { color: #2f8f61; font-size: 12px; font-weight: 700; }
+.module-exec-indicators { padding-top: 8px; border-top: 1px dashed #e2e8f0; }
+.indicator-label { font-size: 11px; color: #5e7388; font-weight: 600; }
+.indicator-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.ind-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; background: rgba(31,137,223,0.08); color: #1f89df; }
+.ind-chip.ind-redline { background: rgba(203,91,75,0.1); color: #cb5b4b; font-weight: 700; }
+.section-desc, .batch-upload-tip, .run-status { margin: 0; color: #5e7388; font-size: 13px; }
+.run-status { padding: 2px 0; }
+.run-feedback { width: 100%; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.readiness-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: #F0F9FF;
+    border: 1px solid #BAE6FD;
+    color: #475569;
+    box-shadow: none;
+}
+.readiness-banner[hidden] { display: none; }
+.readiness-banner-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 132, 199, 0.10);
+    color: #0284c7;
+    flex-shrink: 0;
+}
+.readiness-banner-copy { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.readiness-banner-copy strong { font-size: 13px; color: #0f3b5f; }
+.readiness-banner-copy span { font-size: 12px; line-height: 1.5; color: #476277; }
+.strategic-scope-hint {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    background: #F0F9FF;
+    border: 1px solid #E0F2FE;
+    font-size: 14px;
+    line-height: 1.55;
+    box-sizing: border-box;
 }
 .scope-badge {
     flex-shrink: 0;
-    padding: 0 9px;
-    border-radius: 4px;
-    background: #1e40af;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .02em;
-    line-height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #E0F2FE;
+    color: #0369A1;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+#strategicScopeText {
+    display: inline-block;
+    color: #475569;
+    font-size: 14px;
+    line-height: 1.45;
 }
 .prefilter-summary { display: flex; flex-direction: column; gap: 16px; }
 .prefilter-metrics { display: block; }
@@ -1066,16 +1441,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 .risk-line-red { background: rgba(218, 77, 99, 0.08); color: #c93245; }
 .risk-line-yellow { background: rgba(217, 119, 6, 0.07); color: #c38700; }
 .model-check { width: 18px; height: 18px; border-radius: 4px; accent-color: #1f89df; cursor: pointer; flex-shrink: 0; }
-.cta-btn, .tiny-btn { border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
-.cta-btn { background: linear-gradient(135deg, #1f89df, #3ea3ff); color: #fff; border: none; padding: 8px 20px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
-.cta-btn:hover { box-shadow: 0 6px 20px rgba(31, 137, 223, 0.24); }
-.tiny-btn { border: 1px solid rgba(31, 137, 223, 0.3); background: rgba(255,255,255,0.5); color: #1f89df; padding: 7px 14px; font-size: 13px; }
-.tiny-btn:hover { background: rgba(31, 137, 223, 0.06); }
+.module-check { width: 18px; height: 18px; border-radius: 4px; accent-color: #1f89df; cursor: pointer; flex-shrink: 0; }
+.cta-btn, .tiny-btn { border-radius: 10px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
+.cta-btn {
+    background: linear-gradient(135deg, #0284c7 0%, #1d4ed8 100%);
+    color: #fff;
+    border: none;
+    padding: 10px 22px;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+.cta-btn:hover { filter: brightness(1.06); box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24); transform: translateY(-1px); }
+.tiny-btn {
+    border: 1px solid #e2e8f0;
+    background: transparent;
+    color: #2563eb;
+    padding: 9px 14px;
+    font-size: 13px;
+}
+.ghost-btn { border-color: rgba(226, 232, 240, 0.95); color: #475569; }
+.tiny-btn:hover { background: rgba(148, 163, 184, 0.08); }
+.ghost-btn:hover { background: rgba(148, 163, 184, 0.12); color: #1e293b; }
 .cta-btn:disabled, .tiny-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .report-cta-wrap { margin-top: 12px; display: flex; justify-content: flex-end; }
 .report-cta-btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 14px; text-decoration: none; color: #fff; font-size: 15px; font-weight: 800; background: linear-gradient(135deg, #1f89df, #4ea8ff); box-shadow: 0 6px 20px rgba(31, 137, 223, 0.18); transition: box-shadow 0.2s ease, transform 0.2s ease; }
 .report-cta-btn:hover { box-shadow: 0 10px 28px rgba(31, 137, 223, 0.28); transform: translateY(-1px); }
-#modelSelectionArea.results-mode .model-check { display: none; }
+#modelSelectionArea.results-mode .module-check { display: none; }
 #modelSelectionArea.results-mode .model-card-hero { display: inline-flex; }
 #modelSelectionArea.results-mode .model-card-risk { display: inline-flex; }
 #modelSelectionArea.results-mode .model-card-item {
@@ -1096,16 +1490,22 @@ document.addEventListener("DOMContentLoaded", async () => {
 #modelSelectionArea.results-mode .model-card-item.has-red .model-card-icon { color: #d94d63; }
 #modelSelectionArea.results-mode .model-card-item.has-yellow .model-card-icon { color: #d97706; }
 #modelSelectionArea.results-mode .model-card-item.is-clean .model-card-icon { color: #27b15b; }
+@media (max-width: 1200px) {
+    .module-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 992px) {
     .model-card-grid { grid-template-columns: 1fr; }
     .upload-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .prefilter-list-grid { grid-template-columns: 1fr; }
+    .module-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
-    .upload-slot-grid, .model-card-grid { grid-template-columns: 1fr; }
+    .upload-slot-grid, .model-card-grid, .module-card-grid { grid-template-columns: 1fr; }
     .summary-grid { grid-template-columns: 1fr; }
     .panel-head, .model-board-head, .run-bar, .model-actions { flex-direction: column; align-items: flex-start; }
+    .module-exec-head { grid-template-columns: 1fr; }
+    .module-expand-zone { border-left: 0; border-top: 1px solid rgba(226, 232, 240, 0.9); justify-content: space-between; }
 }
 </style>
 {% endblock %}

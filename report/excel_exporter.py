@@ -15,6 +15,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
+from utils.model_registry import get_model_display_name, legacy_to_display_id
+
 
 def _excel_safe_value(value):
     if value is None:
@@ -93,7 +95,7 @@ def export_to_excel(
             if len(df) == 0:
                 continue
 
-            sheet_name = f"M{model_id}-{model_names.get(model_id, '')}"[:31]
+            sheet_name = f"M{legacy_to_display_id(model_id)}-{model_names.get(model_id, '')}"[:31]
             ws = wb.create_sheet(title=sheet_name)
 
             # Write data
@@ -174,25 +176,57 @@ def export_to_excel(
                     pass
             ws_comp.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
 
-    # Summary sheet
+    # ── Executive Summary Sheet ──
+    from utils.insights import MODEL_ADVICE, overall_assessment
+    ws_exec = wb.create_sheet(title="执行摘要")
+    exec_fill = PatternFill(start_color="F0F6FF", end_color="F0F6FF", fill_type="solid")
+    ws_exec.column_dimensions["A"].width = 18
+    ws_exec.column_dimensions["B"].width = 80
+
+    total_issues = sum(len(df) for df, _ in _model_outputs.values() if df is not None and len(df) > 0)
+    total_red = 0
+    for df, _ in _model_outputs.values():
+        if df is not None and len(df) > 0:
+            total_red += len(df[df["严重等级"].str.contains("red|严禁|重大", na=False)])
+
+    assessment = overall_assessment(0, total_red) if total_red > 0 else overall_assessment(80, 0)
+    ws_exec.append(["审计结论", assessment["label"]])
+    ws_exec.append(["发现问题总数", total_issues])
+    ws_exec.append(["重大风险数", total_red])
+    ws_exec.append([])
+    ws_exec.append(["建议动作", "说明"])
+    if total_red > 0:
+        ws_exec.append(["第一优先级", "5个工作日内完成红色风险事项事实核查，10个工作日内形成整改路径"])
+    ws_exec.append(["持续跟踪", "将预警事项纳入月度整改台账，防止升级"])
+    ws_exec.append(["数据治理", "对关键字段缺失的项目，先补齐数据再复核结论"])
+    for row in ws_exec.iter_rows(min_row=1, max_row=max(ws_exec.max_row, 3)):
+        for cell in row:
+            cell.font = Font(name="Microsoft YaHei UI", size=11)
+            cell.border = thin_border
+    # Apply bold formatting to header row after default font loop
+    ws_exec[5][0].font = Font(name="Microsoft YaHei UI", bold=True, size=11)
+    ws_exec[5][1].font = Font(name="Microsoft YaHei UI", bold=True, size=11)
+
+    # ── Summary sheet ──
     ws_summary = wb.create_sheet(title="汇总")
-    ws_summary.append(["模型编号", "模型名称", "问题总数", "红色风险", "黄色预警"])
+    ws_summary.append(["模型编号", "模型名称", "问题总数", "红色风险", "黄色预警", "管理建议"])
     for cell in ws_summary[1]:
         cell.font = header_font
         cell.fill = header_fill
         cell.border = thin_border
 
-    for model_id in ["1.4", "1.1", "1.2", "1.3", "2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3"]:
+    for model_id in ["1.4", "1.1", "1.2", "1.3", "2.1", "2.2", "2.3", "2.4", "2.5", "3.1", "3.2", "3.3"]:
         if model_id in _model_outputs:
             df, summary = _model_outputs[model_id]
             reds = len(df[df["严重等级"].str.contains("red|严禁", na=False)]) if len(df) > 0 else 0
             yellows = len(df[df["严重等级"].str.contains("yellow|限制", na=False)]) if len(df) > 0 else 0
             ws_summary.append([
-                model_id,
-                model_names.get(model_id, ""),
+                legacy_to_display_id(model_id),
+                get_model_display_name(model_id, include_legacy=True),
                 len(df),
                 reds,
                 yellows,
+                MODEL_ADVICE.get(model_id, ""),
             ])
 
     # ── Discrete Analysis sheets ──

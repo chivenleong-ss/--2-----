@@ -19,9 +19,9 @@
             <span class="kpi-foot">所有模型识别出的风险问题总量</span>
         </article>
         <article class="kpi-card accent-cyan">
-            <span class="kpi-label">模型覆盖数</span>
-            <strong class="kpi-value">{{ stats.models | selectattr('total', 'gt', 0) | list | length }}</strong>
-            <span class="kpi-foot">本批次有输出结果的模型数量</span>
+            <span class="kpi-label">涉及模块数</span>
+            <strong class="kpi-value">{{ (stats.modules | selectattr('total', 'gt', 0) | list | length) if stats.modules else (stats.models | selectattr('total', 'gt', 0) | list | length) }}</strong>
+            <span class="kpi-foot">本批次有审计发现的问题模块数量</span>
         </article>
         <article class="kpi-card accent-red">
             <span class="kpi-label">重大风险占比</span>
@@ -59,12 +59,12 @@
                     <h2>问题明细表单</h2>
                 </div>
                 <div class="tab-switch">
-                    <button class="tab-btn active" type="button" data-panel="top-categories-panel">高频问题类别 TOP 10</button>
-                    <button class="tab-btn" type="button" data-panel="model-details-panel">各模型问题明细</button>
+                    <button class="tab-btn" type="button" data-panel="top-categories-panel">高频问题类别 TOP 10</button>
+                    <button class="tab-btn active" type="button" data-panel="model-details-panel">各模型问题明细</button>
                 </div>
             </div>
 
-            <div class="table-panel active" id="top-categories-panel">
+            <div class="table-panel" id="top-categories-panel">
                 {% if stats.top_categories %}
                 <div class="table-wrap">
                     <table class="data-table top-category-table">
@@ -96,34 +96,40 @@
                 {% endif %}
             </div>
 
-            <div class="table-panel" id="model-details-panel">
+            <div class="table-panel active" id="model-details-panel">
                 {% if stats.models %}
                 <div class="table-wrap">
                     <table class="data-table model-summary-table">
                         <colgroup>
                             <col class="col-model-id">
                             <col class="col-model-name">
+                            <col class="col-module">
                             <col class="col-total">
                             <col class="col-red">
                             <col class="col-yellow">
+                            <col class="col-advice">
                         </colgroup>
                         <thead>
                             <tr>
-                                <th class="center">模型</th>
+                                <th class="center">ID</th>
                                 <th>模型名称</th>
+                                <th class="center">模块</th>
                                 <th class="center">总计</th>
-                                <th class="center">重大风险</th>
+                                <th class="center">重大</th>
                                 <th class="center">预警</th>
+                                <th>建议动作</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for m in stats.models or [] %}
-                            <tr>
-                                <td class="col-model-id"><strong>{{ m.id }}</strong></td>
-                                <td class="col-model-name">{{ m.name }}</td>
+                            <tr {% if m.total > 0 %}class="model-row-clickable" data-model-id="{{ m.id }}" title="点击查看「{{ m.display_name or m.name }}」预警明细"{% endif %}>
+                                <td class="col-model-id"><strong>{{ m.display_id or m.id }}</strong></td>
+                                <td class="col-model-name">{{ m.display_name or m.name }}</td>
+                                <td class="center"><span class="module-tag-pill">{{ m.module_name or "—" }}</span></td>
                                 <td class="center"><strong>{{ m.total }}</strong></td>
                                 <td class="center">{% if m.red > 0 %}<span class="badge-sev badge-red">{{ m.red }}</span>{% else %}0{% endif %}</td>
                                 <td class="center">{% if m.yellow > 0 %}<span class="badge-sev badge-yellow">{{ m.yellow }}</span>{% else %}0{% endif %}</td>
+                                <td class="advice-col">{% if m.total > 0 and m.advice %}{{ m.advice }}{% else %}—{% endif %}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -159,7 +165,7 @@
                 <option value="">-- 选择模型 --</option>
                 {% for m in stats.models %}
                 {% if m.total > 0 %}
-                <option value="{{ m.id }}">{{ m.id }} {{ m.name }}</option>
+                <option value="{{ m.id }}">{{ m.display_name or (m.display_id ~ ' ' ~ m.name) }}</option>
                 {% endif %}
                 {% endfor %}
             </select>
@@ -182,8 +188,14 @@
 {% block scripts %}
 {% if stats.total_issues > 0 %}
 <script>
+{% set modules_list = stats.modules or [] %}
+{% if modules_list %}
+const radarLabels = {{ (modules_list | map(attribute='name') | list) | tojson }};
+const radarValues = {{ (modules_list | map(attribute='total') | list) | tojson }};
+{% else %}
 const radarLabels = {{ (stats.top_categories.keys() | list)[:6] | tojson }};
 const radarValues = {{ (stats.top_categories.values() | list)[:6] | tojson }};
+{% endif %}
 
 function drawIssueRadar() {
     const canvas = document.getElementById("overviewRadarCanvas");
@@ -440,8 +452,26 @@ async function loadModel(modelId) {
     renderDetailTable(currentDetailColumns, currentDetailRows);
 }
 
-document.getElementById("modelSelector").addEventListener("change", function() {
+const modelSelectorEl = document.getElementById("modelSelector");
+modelSelectorEl.addEventListener("change", function() {
     if (this.value) loadModel(this.value);
+});
+// 页面加载后自动选中第一个有数据的模型，避免底部大片空白
+if (modelSelectorEl.options.length > 1) {
+    modelSelectorEl.selectedIndex = 1;
+    loadModel(modelSelectorEl.value);
+}
+
+// 点击"各模型问题明细"表格中有数据的行 → 自动选中对应模型并滚动到明细区域
+document.querySelectorAll(".model-row-clickable").forEach((row) => {
+    row.addEventListener("click", function() {
+        const modelId = this.dataset.modelId;
+        if (modelId) {
+            modelSelectorEl.value = modelId;
+            loadModel(modelId);
+            document.querySelector(".model-detail-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    });
 });
 </script>
 {% endif %}
@@ -513,11 +543,13 @@ document.getElementById("modelSelector").addEventListener("change", function() {
 .top-category-table td:first-child { padding-left: 22px; padding-right: 18px; }
 .top-category-table th:last-child,
 .top-category-table td:last-child { padding-left: 20px; padding-right: 20px; }
-.model-summary-table .col-model-id { width: 14%; }
-.model-summary-table .col-model-name { width: 38%; }
-.model-summary-table .col-total,
-.model-summary-table .col-red,
-.model-summary-table .col-yellow { width: 16%; }
+.model-summary-table .col-model-id { width: 8%; }
+.model-summary-table .col-model-name { width: 22%; }
+.model-summary-table .col-module { width: 12%; }
+.model-summary-table .col-total { width: 11%; }
+.model-summary-table .col-red { width: 9%; }
+.model-summary-table .col-yellow { width: 9%; }
+.model-summary-table .col-advice { width: 29%; }
 .model-summary-table td.col-model-id { text-align: center; }
 .model-summary-table td.col-model-name { white-space: normal; word-break: break-word; overflow-wrap: anywhere; line-height: 1.5; }
 .model-summary-table th.center,
@@ -525,6 +557,10 @@ document.getElementById("modelSelector").addEventListener("change", function() {
 .badge-sev { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
 .badge-red { background: #fff1f2; color: #dc2626; }
 .badge-yellow { background: #fef3c7; color: #d97706; }
+.module-tag-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: rgba(31,137,223,0.08); color: #1f89df; }
+.model-row-clickable { cursor: pointer; transition: background 0.15s; }
+.model-row-clickable:hover { background: rgba(31, 137, 223, 0.08) !important; }
+.model-row-clickable:hover td { color: #1f89df; }
 .empty-lite { padding: 30px 18px; color: #8da0b2; font-size: 13px; text-align: center; }
 .empty-lite.large { padding: 40px 20px; font-size: 14px; }
 @media (max-width: 1200px) {

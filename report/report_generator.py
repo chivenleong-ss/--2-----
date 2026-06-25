@@ -13,6 +13,8 @@ from typing import Any
 
 import pandas as pd
 
+from utils.model_registry import get_model_display_name, legacy_to_display_id
+
 
 MODEL_NAMES = {
     "1.1": "区域授权与跨区经营",
@@ -28,19 +30,8 @@ MODEL_NAMES = {
     "3.2": "新客户质量评估",
 }
 
-MODEL_ADVICE = {
-    "1.1": "复核区域授权边界，对非授权城市、跨区域项目补齐审批依据。",
-    "1.2": "将业务结构偏离纳入季度经营分析，校准新兴业务、EPC、城市更新等资源投放。",
-    "1.3": "对战略客户中标未签约、签约波动项目逐项复盘，形成客户维护清单。",
-    "1.4": "先补齐关键字段，再复核模型结论，避免因源数据缺口造成误判或漏判。",
-    "2.1": "对触碰严禁/限制投标底线项目立即暂停增量动作，开展承接审批追溯。",
-    "2.2": "对承接即亏损、效益偏差项目复核报价测算、成本边界和合同口径。",
-    "2.3": "建立保证金、预收款、回款节点的双日期预警和催收台账。",
-    "2.4": "将高风险合同条款纳入负面清单，推动标准合同文本和例外审批闭环。",
-    "2.5": "对停工退场、在施存疑项目开展现场或台账复核，确认履约真实性。",
-    "3.1": "对客户流失、中标未签约和评级下调客户建立专项跟踪机制。",
-    "3.2": "完善新客户准入评估，避免低质量新客户推高后续合同和资金风险。",
-}
+# Import shared MODEL_ADVICE from insights module to avoid duplication
+from utils.insights import MODEL_ADVICE
 
 
 def generate_report(
@@ -104,7 +95,7 @@ def _write_executive_summary(w, level, total_issues, red_count, yellow_count, af
     if total_issues == 0:
         w("本批次未发现明显异常事项，当前数据下营销经营风险总体可控。建议继续保持常态化监测，重点关注后续新增项目的合同底线、客户质量和资金回收。")
     else:
-        top_text = "、".join(f"{row['model_id']} {row['name']}（{row['issues']}项）" for row in active_models[:3])
+        top_text = "、".join(f"{row.get('display_name', row['model_id'] + ' ' + row['name'])}（{row['issues']}项）" for row in active_models[:3])
         w(f"问题主要集中在 {top_text or '少数模型'}。这说明本批次风险不是单一字段异常，而是需要从项目准入、合同质量、客户履约和资金安全几个环节联动穿透。")
     if red_count > 0:
         w("管理层应优先处理红色风险事项：先控增量、再查存量、同步追溯审批依据，避免风险项目继续扩大敞口。")
@@ -159,7 +150,7 @@ def _write_key_findings(w, model_outputs, active_models) -> None:
         df = _model_df(model_outputs, model_id)
         category_text = _top_category_text(df)
         severity_text = f"红色/重大 {row['red']} 项、黄色 {row['yellow']} 项"
-        w(f"### {model_id} {row['name']}")
+        w(f"### {row.get('display_name', f'{model_id} {row['name']}')}")
         w(f"该模型发现 {row['issues']} 项问题，其中{severity_text}。{category_text}")
         w(f"管理含义：{MODEL_ADVICE.get(model_id, '建议纳入专项整改台账并持续跟踪。')}")
         sample_desc = _first_description(df)
@@ -185,10 +176,10 @@ def _write_dimension_sections(w, model_outputs) -> None:
         else:
             dominant = max(rows, key=lambda row: row["issues"])
             if dominant["issues"] > 0:
-                w(f"其中问题最集中的模块为 **{dominant['model_id']} {dominant['name']}**，共 {dominant['issues']} 项，需作为本维度整改切入点。")
+                w(f"其中问题最集中的模块为 **{dominant.get('display_name', dominant['model_id'] + ' ' + dominant['name'])}**，共 {dominant['issues']} 项，需作为本维度整改切入点。")
             for row in rows:
                 if row["issues"] > 0:
-                    w(f"- {row['model_id']} {row['name']}：{row['issues']} 项。建议：{MODEL_ADVICE.get(row['model_id'], '专项复核。')}")
+                    w(f"- {row.get('display_name', row['model_id'] + ' ' + row['name'])}：{row['issues']} 项。建议：{MODEL_ADVICE.get(row['model_id'], '专项复核。')}")
         w()
 
 
@@ -352,6 +343,8 @@ def _model_stat(model_outputs: dict, model_id: str) -> dict[str, Any]:
     yellow = _severity_count(df, ["yellow", "黄", "预警", "限制"])
     return {
         "model_id": model_id,
+        "display_id": legacy_to_display_id(model_id),
+        "display_name": get_model_display_name(model_id, include_legacy=True),
         "name": MODEL_NAMES.get(model_id, model_id),
         "issues": issues,
         "red": red,

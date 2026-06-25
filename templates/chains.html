@@ -18,7 +18,7 @@
     <div class="rule-card">
         <div class="rule-clean">
             <span class="rule-badge">评分规则</span>
-            <span>关联链风险分 = 命中主体前4条观测严重度分之和 + 主模型命中加权 + 关联模型命中加权。</span>
+            <span>关联链风险分 = 命中主体前4条观测严重度分之和 + 主模块命中加权 + 关联模块命中加权。</span>
             <span>严重度换算：高 = 5 分，中 = 3 分，低 = 1 分。</span>
         </div>
     </div>
@@ -45,6 +45,33 @@
             <span class="kpi-foot">纳入链路分析的主体数量</span>
         </article>
     </section>
+
+    {% if chains %}
+    <div class="topo-grid">
+        <section class="panel-card">
+            <div class="panel-head">
+                <div>
+                    <span class="panel-eyebrow">CROSS-MODULE HEATMAP</span>
+                    <h2>模块关联矩阵</h2>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div id="heatmapChart" style="width:100%;height:420px;"></div>
+            </div>
+        </section>
+        <section class="panel-card">
+            <div class="panel-head">
+                <div>
+                    <span class="panel-eyebrow">TOP PAIRS</span>
+                    <h2>最强关联对</h2>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div id="barChart" style="width:100%;height:420px;"></div>
+            </div>
+        </section>
+    </div>
+    {% endif %}
 
     <section class="panel-card">
         <div class="panel-head">
@@ -96,8 +123,9 @@
                                         <th>主体类型</th>
                                         <th>风险等级</th>
                                         <th>风险分</th>
-                                        <th>主模型</th>
-                                        <th>关联模型</th>
+                                        <th>主模块</th>
+                                        <th>关联模块</th>
+                                        <th>涉及模块</th>
                                         <th>风险标签</th>
                                         <th>证据摘要</th>
                                     </tr>
@@ -117,8 +145,9 @@
                                             {% endif %}
                                         </td>
                                         <td>{{ hit.risk_score }}</td>
-                                        <td>{{ hit.primary_models | join(" / ") }}</td>
-                                        <td>{{ hit.secondary_models | join(" / ") }}</td>
+                                        <td>{{ (hit.primary_modules or []) | join(" / ") }}</td>
+                                        <td>{{ (hit.secondary_modules or []) | join(" / ") }}</td>
+                                        <td>{{ (hit.involved_modules or []) | join(" / ") }}</td>
                                         <td>
                                             <div class="risk-tag-list">
                                                 {% for tag in hit.risk_tags %}
@@ -148,6 +177,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
 .ops-shell { display: flex; flex-direction: column; gap: 18px; }
 .hero-board {
@@ -188,6 +218,8 @@
 .kpi-value { margin-top: 12px; color: #143a61; font-family: "SF Pro Display", "Inter", "Helvetica Neue", sans-serif; font-size: 30px; line-height: 1; font-weight: 800; }
 .kpi-foot { display: block; margin-top: auto; padding-bottom: 2px; color: #8da0b2; font-size: 12px; line-height: 1.5; }
 .panel-card { background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: 16px; box-shadow: var(--glass-shadow); overflow: hidden; }
+.topo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 1000px) { .topo-grid { grid-template-columns: 1fr; } }
 .rule-card { padding: 10px 12px; border-radius: 6px; background: linear-gradient(90deg, #e8f0ff 0%, #f4f7ff 100%); border: 1px solid #c9d9ff; box-shadow: inset 0 1px 0 rgba(255,255,255,.75); overflow: hidden; }
 .rule-clean { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; color: #49627e; font-size: 12px; line-height: 1.55; }
 .rule-clean span { display: inline-flex; align-items: center; min-height: 24px; }
@@ -351,5 +383,176 @@ function resetChainFilters(btn) {
     bar.querySelectorAll("select.chain-filter").forEach(function(sel) { sel.value = ""; });
     applyChainFilters(bar);
 }
+
+// ── 模块名称映射 ──
+(function() {
+    var mmap = {{ module_model_map | default({}) | tojson }};
+    // 内置兜底：后端未传 module_model_map 时使用硬编码映射
+    if (Object.keys(mmap).length === 0) {
+        mmap = {
+            "模块一": {name: "区域布局"},
+            "模块二": {name: "客户稳定"},
+            "模块三": {name: "合同质量"},
+            "模块四": {name: "履约盈利"},
+            "模块五": {name: "资金效率"},
+            "模块六": {name: "数据质量"}
+        };
+    }
+    window._MODULE_LABEL = {};
+    Object.keys(mmap).forEach(function(k) {
+        window._MODULE_LABEL[k] = mmap[k].name;
+    });
+    // reverse: "区域布局" → "模块一"
+    window._MODULE_KEY_BY_NAME = {};
+    Object.keys(mmap).forEach(function(k) {
+        window._MODULE_KEY_BY_NAME[mmap[k].name] = k;
+    });
+})();
+
+function moduleLabel(key) {
+    return window._MODULE_LABEL[key] || key;
+}
+
+// ── 模块关联矩阵（热力图）──
+(function drawHeatmap() {
+    var dom = document.getElementById("heatmapChart");
+    if (!dom) return;
+    var chains = {{ chain_stats.chains | tojson }};
+    if (!chains || !chains.length) { dom.style.display = "none"; return; }
+
+    // 收集所有模块对（双向合并）
+    var pairCount = {};  // "模块一|模块二" → count
+    var allMods = new Set();
+    chains.forEach(function(chain) {
+        (chain.hits || []).forEach(function(hit) {
+            var pms = hit.primary_modules || [];
+            var sms = hit.secondary_modules || [];
+            pms.forEach(function(pm) {
+                sms.forEach(function(sm) {
+                    if (pm && sm && pm !== sm) {
+                        allMods.add(pm); allMods.add(sm);
+                        var pair = [pm, sm].sort().join("|");
+                        pairCount[pair] = (pairCount[pair] || 0) + 1;
+                    }
+                });
+            });
+        });
+    });
+    // ensure all modules appear even if no cross-links
+    Object.keys(window._MODULE_LABEL).forEach(function(m) { allMods.add(m); });
+
+    var modList = Array.from(allMods).sort();
+    var modLabels = modList.map(moduleLabel);
+
+    // 构建矩阵
+    var matrixData = [];
+    var maxCount = 0;
+    for (var ri = 0; ri < modList.length; ri++) {
+        for (var ci = 0; ci < modList.length; ci++) {
+            if (ri === ci) {
+                matrixData.push([ci, ri, "-"]);
+            } else {
+                var pair = [modList[ri], modList[ci]].sort().join("|");
+                var v = pairCount[pair] || 0;
+                matrixData.push([ci, ri, v]);
+                if (v > maxCount) maxCount = v;
+            }
+        }
+    }
+
+    var chart = echarts.init(dom);
+    chart.setOption({
+        tooltip: {
+            formatter: function(p) {
+                if (p.value[2] === "-") return modLabels[p.value[0]] + " 模块内";
+                return modLabels[p.value[1]] + " ↔ " + modLabels[p.value[0]] + "<br/>关联次数：<b>" + p.value[2] + "</b>";
+            }
+        },
+        grid: { left: 100, right: 60, top: 10, bottom: 80 },
+        xAxis: {
+            type: "category", data: modLabels,
+            axisLabel: { rotate: 30, fontSize: 11, color: "#445468" },
+            position: "top"
+        },
+        yAxis: {
+            type: "category", data: modLabels,
+            axisLabel: { fontSize: 11, color: "#445468" },
+            inverse: true
+        },
+        visualMap: {
+            min: 0, max: maxCount || 1,
+            inRange: { color: ["#f0f5ff", "#bdd7ff", "#6ba3f0", "#1a6dd4", "#0b3d80"] },
+            calculable: true,
+            orient: "vertical", right: 10, top: "center",
+            text: ["多", "少"], textStyle: { color: "#445468", fontSize: 11 }
+        },
+        series: [{
+            type: "heatmap", data: matrixData,
+            label: { show: true, fontSize: 13, fontWeight: 700, color: function(p) {
+                return p.value[2] === "-" ? "#aaa" : (p.value[2] > maxCount * 0.5 ? "#fff" : "#2c3e50");
+            }},
+            emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.25)" } }
+        }]
+    });
+    window.addEventListener("resize", function() { chart.resize(); });
+})();
+
+// ── 最强关联对（横向柱状图）──
+(function drawBar() {
+    var dom = document.getElementById("barChart");
+    if (!dom) return;
+    var chains = {{ chain_stats.chains | tojson }};
+    if (!chains || !chains.length) { dom.style.display = "none"; return; }
+
+    var pairCount = {};
+    chains.forEach(function(chain) {
+        (chain.hits || []).forEach(function(hit) {
+            var pms = hit.primary_modules || [];
+            var sms = hit.secondary_modules || [];
+            pms.forEach(function(pm) {
+                sms.forEach(function(sm) {
+                    if (pm && sm && pm !== sm) {
+                        var pair = [pm, sm].sort().join("|");
+                        pairCount[pair] = (pairCount[pair] || 0) + 1;
+                    }
+                });
+            });
+        });
+    });
+
+    var pairs = Object.entries(pairCount)
+        .sort(function(a, b) { return b[1] - a[1]; })
+        .slice(0, 15);
+    if (!pairs.length) { dom.style.display = "none"; return; }
+
+    var labels = pairs.map(function(p) {
+        var mods = p[0].split("|");
+        return moduleLabel(mods[0]) + " ↔ " + moduleLabel(mods[1]);
+    });
+    var values = pairs.map(function(p) { return p[1]; });
+
+    var chart = echarts.init(dom);
+    chart.setOption({
+        tooltip: { trigger: "axis" },
+        grid: { left: 130, right: 40, top: 10, bottom: 20 },
+        xAxis: { type: "value", name: "关联次数", nameTextStyle: { color: "#667b90", fontSize: 11 } },
+        yAxis: {
+            type: "category", data: labels.reverse(),
+            axisLabel: { fontSize: 11, color: "#2c3e50" },
+            inverse: true
+        },
+        series: [{
+            type: "bar", data: values.reverse(),
+            itemStyle: {
+                borderRadius: [0, 6, 6, 0],
+                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                    { offset: 0, color: "#1a6dd4" }, { offset: 1, color: "#90caf9" }
+                ])
+            },
+            label: { show: true, position: "right", fontSize: 12, fontWeight: 700, color: "#143a61" }
+        }]
+    });
+    window.addEventListener("resize", function() { chart.resize(); });
+})();
 </script>
 {% endblock %}

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from utils.model_registry import get_model_display_name, legacy_to_display_id
+
 
 CHAIN_DEFINITIONS = {
     "strategic_risk": {
@@ -83,7 +85,10 @@ SEVERITY_COLUMNS = [
 @dataclass
 class Observation:
     model_id: str
+    display_id: str
     model_name: str
+    module_id: str
+    module_name: str
     entity_key: str
     entity_name: str
     entity_type: str
@@ -93,8 +98,13 @@ class Observation:
     evidence: str
 
 
-def build_chain_payload(results: dict[str, Any], model_registry: dict[str, dict[str, str]]) -> dict[str, Any]:
-    observations = _collect_observations(results, model_registry)
+def build_chain_payload(
+    results: dict[str, Any],
+    model_registry: dict[str, dict[str, str]],
+    model_to_module: dict[str, str] | None = None,
+    module_model_map: dict[str, dict] | None = None,
+) -> dict[str, Any]:
+    observations = _collect_observations(results, model_registry, model_to_module)
     grouped = _group_by_entity(observations)
     chains = []
 
@@ -126,8 +136,13 @@ def build_chain_payload(results: dict[str, Any], model_registry: dict[str, dict[
     return {"summary": summary, "chains": chains}
 
 
-def _collect_observations(results: dict[str, Any], model_registry: dict[str, dict[str, str]]) -> list[Observation]:
+def _collect_observations(
+    results: dict[str, Any],
+    model_registry: dict[str, dict[str, str]],
+    model_to_module: dict[str, str] | None = None,
+) -> list[Observation]:
     observations: list[Observation] = []
+    _mtm = model_to_module or {}
     for model_id, payload in results.items():
         if model_id not in model_registry:
             continue
@@ -139,6 +154,13 @@ def _collect_observations(results: dict[str, Any], model_registry: dict[str, dic
 
         if df is None or getattr(df, "empty", True):
             continue
+
+        mod_key = _mtm.get(model_id, "")
+        mod_name = ""
+        if mod_key and "：" in mod_key:
+            mod_name = mod_key.split("：")[1]
+        elif mod_key:
+            mod_name = mod_key
 
         for _idx, row in df.iterrows():
             row_dict = {}
@@ -165,7 +187,10 @@ def _collect_observations(results: dict[str, Any], model_registry: dict[str, dic
             observations.append(
                 Observation(
                     model_id=model_id,
+                    display_id=legacy_to_display_id(model_id),
                     model_name=model_registry[model_id]["name"],
+                    module_id=mod_key,
+                    module_name=mod_name,
                     entity_key=str(entity_key),
                     entity_name=str(entity_name),
                     entity_type=entity_type,
@@ -206,6 +231,20 @@ def _build_chain_hits(chain_id: str, definition: dict[str, Any], grouped: dict[s
         unique_tags = list(dict.fromkeys(tag for tag in tags if tag))
         severity = _score_to_level(risk_score)
 
+        # 提取涉及的模块（去重保持顺序）
+        involved_module_ids = list(dict.fromkeys(
+            item.module_id for item in top_items if item.module_id
+        ))
+        # 主/关联模块从各自主模型、关联模型的 Observation 中提取
+        primary_module_ids = list(dict.fromkeys(
+            item.module_id for item in items
+            if item.model_id in primary and item.module_id
+        ))
+        secondary_module_ids = list(dict.fromkeys(
+            item.module_id for item in items
+            if item.model_id in secondary and item.module_id
+        ))
+
         hits.append(
             {
                 "chain_id": chain_id,
@@ -215,11 +254,17 @@ def _build_chain_hits(chain_id: str, definition: dict[str, Any], grouped: dict[s
                 "severity": severity,
                 "risk_score": risk_score,
                 "involved_models": [item.model_id for item in top_items],
+                "involved_display_models": [item.display_id for item in top_items],
+                "involved_modules": involved_module_ids,
                 "model_names": [item.model_name for item in top_items],
                 "primary_models": primary_hits,
+                "primary_display_models": [legacy_to_display_id(model_id) for model_id in primary_hits],
+                "primary_modules": primary_module_ids,
                 "secondary_models": secondary_hits,
+                "secondary_display_models": [legacy_to_display_id(model_id) for model_id in secondary_hits],
+                "secondary_modules": secondary_module_ids,
                 "risk_tags": unique_tags[:8],
-                "evidence_summary": "；".join(f"{item.model_id}：{item.evidence}" for item in top_items if item.evidence)[:240],
+                "evidence_summary": "；".join(f"{item.display_id}：{item.evidence}" for item in top_items if item.evidence)[:240],
                 "recommended_action": definition["suggestion"],
                 "source_count": len(items),
             }

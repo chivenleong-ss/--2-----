@@ -10,6 +10,7 @@ import os
 import pickle
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -25,7 +26,7 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template, re
 # 屏蔽 openpyxl 读取无默认样式 Excel 的噪音警告
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
-from correlation.chain_report import build_chain_payload
+from correlation.chain_report import CHAIN_DEFINITIONS, build_chain_payload
 from data_loader.admin_structure_loader import (
     ALL_CITY,
     ALL_DIRECT,
@@ -41,6 +42,12 @@ from data_loader.admin_structure_loader import (
 )
 from models.business_analysis import BusinessHealthAnalyzer
 from models.discrete_analysis import DiscreteAnalyzer
+from utils.model_registry import (
+    LEGACY_MODEL_REGISTRY,
+    build_display_registry,
+    display_to_legacy_id,
+    legacy_to_display_id,
+)
 from utils.strategic_scope import detect_strategic_scope, summarize_strategic_scope
 from utils.qcc_risk_screening import analyze_qcc_risk
 
@@ -67,7 +74,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 (OUTPUT_DIR / "model_outputs").mkdir(parents=True, exist_ok=True)
 (OUTPUT_DIR / "reports").mkdir(parents=True, exist_ok=True)
 
-pipeline_status = {"running": False, "progress": "", "error": None}
+pipeline_status = {"running": False, "progress": "", "error": None, "recent_logs": [], "output": ""}
 pipeline_lock = threading.Lock()
 export_lock = threading.Lock()  # v2.10: 导出与数据刷新互斥锁
 RUN_ACTION_TOKEN = secrets.token_urlsafe(32)
@@ -75,6 +82,51 @@ RUN_ACTION_TOKEN = secrets.token_urlsafe(32)
 _BUSINESS_SOURCE_CACHE = {"signature": None, "df": None}
 _LABELED_BUSINESS_CACHE = {"signature": None, "df": None}
 _SCOPE_OPTIONS_CACHE = {"signature": None, "data": None}
+
+
+def _latest_existing_path(primary: Path, pattern: str) -> Path:
+    if primary.exists():
+        return primary
+    candidates = []
+    try:
+        candidates.extend(PROJECT_ROOT.glob(pattern))
+    except OSError:
+        pass
+    files = [path for path in candidates if path.is_file()]
+    if not files:
+        return primary
+    return max(files, key=lambda path: path.stat().st_mtime)
+
+
+def _resolve_python_command() -> list[str]:
+    """Return a stable Python command for child pipeline runs.
+
+    In some Windows desktop sessions, ``sys.executable`` can become invalid
+    after the terminal/session is restarted, which makes the web app able to
+    serve requests but unable to launch ``main.py``. Prefer the current
+    interpreter when it exists, then fall back to the known local install, and
+    finally to the ``py`` launcher.
+    """
+    candidates = []
+
+    if sys.executable:
+        candidates.append(Path(sys.executable))
+
+    candidates.append(Path(r"C:\Users\sasa\AppData\Local\Python\pythoncore-3.14-64\python.exe"))
+
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if candidate.exists():
+                return [str(candidate)]
+        except OSError:
+            continue
+
+    return ["py", "-3"]
 
 
 def _safe_console_text(text: str) -> str:
@@ -86,6 +138,152 @@ def _safe_console_text(text: str) -> str:
         return message
     except UnicodeEncodeError:
         return message.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def _find_listening_pids(port: int) -> list[int]:
+    """Return PIDs listening on the given TCP port."""
+    try:
+        completed = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except Exception:
+        return []
+
+    pids = set()
+    target_suffix = f":{port}"
+    for raw_line in (completed.stdout or "").splitlines():
+        line = raw_line.strip()
+        if "LISTENING" not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        local_addr = parts[1]
+        state = parts[3]
+        pid_text = parts[4]
+        if state != "LISTENING" or not local_addr.endswith(target_suffix):
+            continue
+        try:
+            pids.add(int(pid_text))
+        except ValueError:
+            continue
+    return sorted(pids)
+
+
+def _query_process_info(pid: int) -> dict:
+    """Best-effort process metadata lookup for a PID."""
+    try:
+        command = (
+            f"Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\" | "
+            "Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        text = (completed.stdout or "").strip()
+        if not text:
+            return {"pid": pid}
+        payload = json.loads(text)
+        return {
+            "pid": int(payload.get("ProcessId", pid)),
+            "name": str(payload.get("Name", "") or ""),
+            "path": str(payload.get("ExecutablePath", "") or ""),
+            "command_line": str(payload.get("CommandLine", "") or ""),
+        }
+    except Exception:
+        return {"pid": pid}
+
+
+def _is_same_project_web_process(proc_info: dict) -> bool:
+    cmd = str(proc_info.get("command_line", "") or "").lower()
+    root = str(PROJECT_ROOT).lower()
+    return (
+        "python" in str(proc_info.get("name", "")).lower()
+        and "web_app.py" in cmd
+        and root in cmd
+    )
+
+
+def _stop_processes(pids: list[int]) -> tuple[list[int], list[int]]:
+    stopped, failed = [], []
+    for pid in pids:
+        try:
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+            )
+            if completed.returncode == 0:
+                stopped.append(pid)
+            else:
+                failed.append(pid)
+        except Exception:
+            failed.append(pid)
+    return stopped, failed
+
+
+def _port_is_bindable(port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _ensure_startup_port_ready(port: int = 5001) -> bool:
+    """Check port occupancy before app.run and safely auto-clean stale same-app listeners."""
+    if _port_is_bindable(port):
+        return True
+
+    pids = _find_listening_pids(port)
+    infos = [_query_process_info(pid) for pid in pids]
+    stale_same_app = [info["pid"] for info in infos if _is_same_project_web_process(info)]
+
+    if stale_same_app:
+        print(_safe_console_text(f"[startup] 检测到 {port} 端口被同项目残留 web_app 进程占用，尝试自动清理: {stale_same_app}"), flush=True)
+        stopped, failed = _stop_processes(stale_same_app)
+        if stopped:
+            print(_safe_console_text(f"[startup] 已停止残留进程: {stopped}"), flush=True)
+            time.sleep(1.0)
+        if failed:
+            print(_safe_console_text(f"[startup] 自动停止失败: {failed}"), flush=True)
+        if _port_is_bindable(port):
+            return True
+
+    print("=" * 60, flush=True)
+    print(_safe_console_text(f"[startup] 端口 {port} 已被占用，无法启动网页端。"), flush=True)
+    if infos:
+        print("[startup] 当前监听进程：", flush=True)
+        for info in infos:
+            desc = f"PID={info.get('pid')} name={info.get('name') or '?'}"
+            cmd = str(info.get("command_line", "") or "").strip()
+            if cmd:
+                desc += f" cmd={cmd[:180]}"
+            print(_safe_console_text(f"  - {desc}"), flush=True)
+    print(_safe_console_text(f"[startup] 处理方式：先执行 `netstat -ano | findstr :{port}`"), flush=True)
+    print(_safe_console_text(f"[startup] 然后执行 `Stop-Process -Id <PID1>,<PID2> -Force`"), flush=True)
+    print(_safe_console_text(f"[startup] 清理完成后重新运行 `python web_app.py`"), flush=True)
+    print("=" * 60, flush=True)
+    return False
 
 
 def cleanup_after_request(func):
@@ -117,7 +315,7 @@ DATA_SLOTS = {
         "target": "【附件5】附表：营销质量管理专项审计附表（定稿）(1).xlsx",
     },
     "qcc_risk": {
-        "label": "企业信息（企查查）",
+        "label": "企业信息",
         "desc": "企查查导出的风险排查表",
         "required": False,
         "target": None,
@@ -131,18 +329,38 @@ DATA_SLOTS = {
 }
 
 MODELS = {
-    "1.1": {"name": "区域布局与区域合规性检测", "dim": "维度一：战略与布局"},
-    "1.2": {"name": "业务结构战略性偏离检测", "dim": "维度一：战略与布局"},
-    "1.3": {"name": "战略客户市场布局", "dim": "维度一：战略与布局"},
+    "1.1": {"name": "区域布局动态偏差检测与窜区预警（v4.0 +授权城市覆盖）", "dim": "维度一：战略与布局"},
+    "1.2": {"name": "业务结构战略性偏离检测（v4.0 城市更新+新兴业务占比<5%）", "dim": "维度一：战略与布局"},
+    "1.3": {"name": "战略客户组合监控", "dim": "维度一：战略与布局"},
     "1.4": {"name": "营销统计数据多维交叉验真", "dim": "维度一：战略与布局"},
     "2.1": {"name": "风险分级严禁投标底线检测", "dim": "维度二：合同质量与风险"},
-    "2.2": {"name": "盈利分析与履约异常检测", "dim": "维度二：合同质量与风险"},
+    "2.2": {"name": "盈利底线与效益偏差检测", "dim": "维度二：合同质量与风险"},
     "2.3": {"name": "保证金与预收款资金安全监控", "dim": "维度二：合同质量与风险"},
     "2.4": {"name": "合同条款风险穿透", "dim": "维度二：合同质量与风险"},
-    "2.5": {"name": "施工真实性验证", "dim": "维度二：合同质量与风险"},
-    "3.1": {"name": "客户全生命周期监控", "dim": "维度三：客户健康度"},
+    "2.5": {"name": "施工真实性验证（v4.0 签约>12月+产值<10%→red）", "dim": "维度二：合同质量与风险"},
+    "3.1": {"name": "客户全生命周期监控（中标转化+流失分级+评级核查）", "dim": "维度三：客户健康度"},
     "3.2": {"name": "新客户质量评估与客户结构优化", "dim": "维度三：客户健康度"},
 }
+LEGACY_MODELS = LEGACY_MODEL_REGISTRY
+MODELS = build_display_registry(include_legacy=True)
+
+# ── 六模块聚合常量（从 MODELS 自动构建） ──
+_MODULE_IDS = sorted(set(
+    (m.get("module_id"), m.get("module_name", ""))
+    for m in MODELS.values()
+    if m.get("module_id")
+), key=lambda x: x[0])
+MODULE_MODEL_MAP = {}
+for mod_id, mod_name_full in _MODULE_IDS:
+    mod_key = mod_name_full.split("：")[0] if "：" in mod_name_full else mod_name_full
+    mod_short = mod_name_full.split("：")[1] if "：" in mod_name_full else mod_name_full
+    models_in = [lid for lid, m in MODELS.items() if m.get("module_id") == mod_id]
+    MODULE_MODEL_MAP[mod_key] = {
+        "id": mod_id, "name": mod_short,
+        "models": models_in,
+        "dim": MODELS[models_in[0]]["dim"] if models_in else "",
+    }
+MODEL_TO_MODULE = {m: k for k, v in MODULE_MODEL_MAP.items() for m in v["models"]}
 
 
 @app.after_request
@@ -154,27 +372,64 @@ def add_no_cache_headers(response):
 
 
 def load_cached_results():
-    if CACHE_PATH.exists():
-        with open(CACHE_PATH, "rb") as file:
-            return pickle.load(file)
+    cache_path = _latest_existing_path(CACHE_PATH, "*/output/model_outputs/_all_results.pkl")
+    if cache_path.exists():
+        cached = _load_pickle(cache_path, {})
+        if cached:
+            return cached
+    fallback = _load_results_from_csv_outputs()
+    if fallback:
+        return fallback
     return {}
 
 
 def load_cached_results_for_export():
-    if CACHE_PATH.exists():
-        with open(CACHE_PATH, "rb") as file:
-            return pickle.load(file)
+    cache_path = _latest_existing_path(CACHE_PATH, "*/output/model_outputs/_all_results.pkl")
+    if cache_path.exists():
+        cached = _load_pickle(cache_path, {})
+        if cached:
+            return cached
+    fallback = _load_results_from_csv_outputs()
+    if fallback:
+        return fallback
     return {}
 
 
 def _load_pickle(path, default):
     try:
-        if path.exists():
-            with open(path, "rb") as file:
-                return pickle.load(file)
+        pattern_map = {
+            CACHE_PATH.name: "*/output/model_outputs/_all_results.pkl",
+            BUSINESS_PATH.name: "*/output/model_outputs/_business_results.pkl",
+            DISCRETE_PATH.name: "*/output/model_outputs/_discrete_results.pkl",
+            PREFILTER_PATH.name: "*/output/model_outputs/_prefilter_summary.json",
+        }
+        real_path = _latest_existing_path(path, pattern_map.get(path.name, ""))
+        if real_path.exists():
+            with open(real_path, "rb") as file:
+                payload = pickle.load(file)
+            if isinstance(payload, dict) and "__cache_version__" in payload:
+                return payload.get("data", default)
+            return payload
     except Exception:
         pass
     return default
+
+
+def _load_results_from_csv_outputs():
+    outputs_dir = OUTPUT_DIR / "model_outputs"
+    if not outputs_dir.exists():
+        return {}
+    results = {}
+    for model_id in MODELS:
+        csv_path = outputs_dir / f"model_{model_id.replace('.', '_')}_output.csv"
+        if not csv_path.exists():
+            continue
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception:
+            continue
+        results[model_id] = (df, {})
+    return results
 
 
 def load_prefilter_summary():
@@ -204,6 +459,36 @@ def save_upload_manifest(manifest):
         json.dump(manifest, file, ensure_ascii=False, indent=2)
 
 
+def _preserved_upload_names() -> set[str]:
+    preserved = {"admin_structure.xlsx"}
+    admin_target = DATA_SLOTS.get("admin_structure", {}).get("target")
+    if admin_target:
+        preserved.add(str(admin_target))
+    return preserved
+
+
+def clear_uploaded_files_safe():
+    preserved_names = _preserved_upload_names()
+    for pattern in ("*.xlsx", "*.xls", "*.csv", "*.txt"):
+        for path in UPLOAD_DIR.glob(pattern):
+            if path.name in preserved_names:
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                try:
+                    if path.exists():
+                        os.remove(path)
+                except OSError:
+                    pass
+    if UPLOAD_MANIFEST_PATH.exists():
+        try:
+            UPLOAD_MANIFEST_PATH.unlink()
+        except OSError:
+            pass
+    clear_business_runtime_caches()
+
+
 def clear_uploaded_files():
     preserved_names = {"行政架构-四局.xlsx", "admin_structure.xlsx"}
     preserved_names.add("行政架构-四局.xlsx")
@@ -228,6 +513,13 @@ def clear_runtime_outputs():
         if path.exists():
             try:
                 path.unlink()
+            except OSError:
+                pass
+    outputs_dir = OUTPUT_DIR / "model_outputs"
+    if outputs_dir.exists():
+        for csv_path in outputs_dir.glob("model_*_output.csv"):
+            try:
+                csv_path.unlink()
             except OSError:
                 pass
 
@@ -314,13 +606,17 @@ def required_uploads_ready():
 
 
 def _empty_stats():
-    return {"total_issues": 0, "total_red": 0, "total_yellow": 0, "models": [], "top_categories": {}}
+    return {"total_issues": 0, "total_red": 0, "total_yellow": 0, "models": [], "modules": [], "top_categories": {}}
 
 
 def get_model_stats(results_override=None):
+    if results_override is None and not required_uploads_ready():
+        return _empty_stats()
     results = results_override if results_override is not None else load_cached_results()
     if not results:
         return _empty_stats()
+
+    from utils.insights import MODEL_ADVICE as _MODEL_ADVICE
 
     models_data = []
     total_issues = 0
@@ -330,16 +626,28 @@ def get_model_stats(results_override=None):
 
     for model_id in MODELS:
         df, summary = results.get(model_id, (None, {}))
+        display_id = legacy_to_display_id(model_id)
+        import re as _re
+        display_name = MODELS[model_id].get("label") or f"{display_id} {MODELS[model_id]['name']}"
+        display_name = _re.sub(r"（原[\d.]+）\s*", "", display_name)
+        mod_info = MODELS[model_id]
+        advice = _MODEL_ADVICE.get(model_id, "")
+
         if df is None or len(df) == 0:
             models_data.append(
                 {
                     "id": model_id,
-                    "name": MODELS[model_id]["name"],
+                    "display_id": display_id,
+                    "name": mod_info["name"],
+                    "display_name": display_name,
+                    "module_name": mod_info.get("module_name", ""),
+                    "module_id": mod_info.get("module_id"),
                     "total": 0,
                     "red": 0,
                     "yellow": 0,
                     "categories": {},
                     "summary": summary or {},
+                    "advice": advice,
                 }
             )
             continue
@@ -360,35 +668,130 @@ def get_model_stats(results_override=None):
         models_data.append(
             {
                 "id": model_id,
-                "name": MODELS[model_id]["name"],
+                "display_id": display_id,
+                "name": mod_info["name"],
+                "display_name": display_name,
+                "module_name": mod_info.get("module_name", ""),
+                "module_id": mod_info.get("module_id"),
                 "total": len(df),
                 "red": reds,
                 "yellow": yellows,
                 "categories": {str(k): int(v) for k, v in cats.items()},
                 "summary": summary or {},
+                "advice": advice,
             }
         )
+
+    # ── 模块聚合 ──
+    modules_data = []
+    for mod_key, mod_info in MODULE_MODEL_MAP.items():
+        mod_total, mod_red, mod_yellow = 0, 0, 0
+        mod_models = []
+        for m in models_data:
+            if m["id"] in mod_info["models"]:
+                mod_total += m["total"]
+                mod_red += m["red"]
+                mod_yellow += m["yellow"]
+                mod_models.append({
+                    "id": m["id"], "display_id": m.get("display_id", m["id"]),
+                    "name": m["name"], "total": m["total"], "red": m["red"], "yellow": m["yellow"],
+                })
+        modules_data.append({
+            "key": mod_key, "id": mod_info["id"], "name": mod_info["name"],
+            "dim": mod_info["dim"], "models": mod_models,
+            "total": mod_total, "red": mod_red, "yellow": mod_yellow,
+        })
 
     return {
         "total_issues": total_issues,
         "total_red": total_red,
         "total_yellow": total_yellow,
         "models": models_data,
+        "modules": modules_data,
         "top_categories": dict(sorted(categories_count.items(), key=lambda item: -item[1])[:10]),
     }
 
 
 def get_chain_stats():
+    if not required_uploads_ready():
+        return {"summary": {"total_hits": 0, "chains_with_hits": 0, "max_risk_score": 0, "entity_count": 0}, "chains": []}
     results = load_cached_results()
     if not results:
         return {"summary": {"total_hits": 0, "chains_with_hits": 0, "max_risk_score": 0, "entity_count": 0}, "chains": []}
-    return build_chain_payload(results, MODELS)
+    return build_chain_payload(results, MODELS, MODEL_TO_MODULE, MODULE_MODEL_MAP)
+
+
+def _apply_prefilter_to_dmp(dmp: "pd.DataFrame") -> "pd.DataFrame":
+    """Remove unstarted projects from DMP based on prefilter summary."""
+    prefilter = load_prefilter_summary()
+    if not prefilter or not prefilter.get("prefilter_completed"):
+        return dmp
+    unstarted = prefilter.get("unstarted_projects", [])
+    if not unstarted:
+        return dmp
+    excluded_codes = set(str(p.get("project_code", "")) for p in unstarted if p.get("project_code"))
+    if not excluded_codes:
+        return dmp
+    return dmp[~dmp["项目编码"].astype(str).isin(excluded_codes)].copy()
+
+
+def _scoped_project_codes(df: "pd.DataFrame") -> set[str]:
+    """Build a normalized scoped project-code whitelist from filtered business data."""
+    if df is None or df.empty or "项目编码" not in df.columns:
+        return set()
+    return {
+        str(code).strip()
+        for code in df["项目编码"].tolist()
+        if str(code).strip()
+    }
+
+
+def _is_cache_fresh(target: Path, dependencies: list[Path]) -> bool:
+    """Return True when target exists and is not older than its dependencies."""
+    try:
+        if not target.exists():
+            return False
+        target_mtime = target.stat().st_mtime_ns
+    except OSError:
+        return False
+
+    for dep in dependencies:
+        try:
+            if dep.exists() and dep.stat().st_mtime_ns > target_mtime:
+                return False
+        except OSError:
+            continue
+    return True
+
+
+def _business_cache_dependencies() -> list[Path]:
+    return [
+        CACHE_PATH,
+        PREFILTER_PATH,
+        PROJECT_ROOT / "config" / "rules.json",
+    ]
+
+
+def _discrete_cache_dependencies() -> list[Path]:
+    return [
+        CACHE_PATH,
+        PREFILTER_PATH,
+        BUSINESS_PATH,
+        DISCRETE_PATH.parent / "_business_results.pkl",
+        PROJECT_ROOT / "config" / "rules.json",
+        PROJECT_ROOT / "config" / "discrete_rules.json",
+    ]
 
 
 def get_business_stats():
-    if BUSINESS_PATH.exists():
-        with open(BUSINESS_PATH, "rb") as file:
-            return pickle.load(file)
+    cached = _load_pickle(BUSINESS_PATH, None)
+    if (
+        cached
+        and isinstance(cached, dict)
+        and cached.get("summary", {}).get("total_projects")
+        and _is_cache_fresh(BUSINESS_PATH, _business_cache_dependencies())
+    ):
+        return cached
 
     results = load_cached_results()
     if not results:
@@ -403,16 +806,23 @@ def get_business_stats():
         bid_report = load_bid_report()
         dmp = build_unified_projects(dmp_raw, appendices, bid_report)
         dmp = merge_qcc_risk(dmp)
+        dmp = _apply_prefilter_to_dmp(dmp)
         analyzer = BusinessHealthAnalyzer(_load_config())
-        return analyzer.run(results, dmp)
+        analyzer._set_model_cache(results)
+        business_results = analyzer.run(results, dmp)
+        try:
+            with open(BUSINESS_PATH, "wb") as file:
+                pickle.dump(business_results, file)
+        except OSError:
+            pass
+        return business_results
     except Exception:
         return {"summary": {"total_projects": 0, "total_contract_yi": 0.0}, "overview": {}, "subsidiaries": [], "cities": []}
 
 
 def get_discrete_stats():
-    if DISCRETE_PATH.exists():
-        with open(DISCRETE_PATH, "rb") as file:
-            cached = pickle.load(file)
+    cached = _load_pickle(DISCRETE_PATH, None)
+    if cached and isinstance(cached, dict) and _is_cache_fresh(DISCRETE_PATH, _discrete_cache_dependencies()):
         grid = cached.get("grid_distribution", {}) if isinstance(cached, dict) else {}
         projects_cached = cached.get("projects") if isinstance(cached, dict) else None
         cities_cached = cached.get("cities") if isinstance(cached, dict) else None
@@ -438,11 +848,12 @@ def get_discrete_stats():
         bid_report = load_bid_report()
         dmp = build_unified_projects(dmp_raw, appendices, bid_report)
         dmp = merge_qcc_risk(dmp)
+        dmp = _apply_prefilter_to_dmp(dmp)
         appendix_df = appendices.get("appendix_1", None) if appendices else None
         analyzer = DiscreteAnalyzer(config)
 
         # v2.10: 优先使用六模块指标进行离散分析
-        business_results = _load_pickle(BUSINESS_PATH, None)
+        business_results = get_business_stats()
         if business_results and isinstance(business_results, dict):
             try:
                 discrete_results = analyzer.run_with_module_scores(
@@ -757,6 +1168,7 @@ def _load_business_source_df() -> pd.DataFrame:
     bid_report = load_bid_report()
     dmp = build_unified_projects(dmp_raw, appendices, bid_report)
     dmp = merge_qcc_risk(dmp)
+    dmp = _apply_prefilter_to_dmp(dmp)
     if dmp is None or not hasattr(dmp, "copy"):
         empty_df = pd.DataFrame()
         _BUSINESS_SOURCE_CACHE["signature"] = signature
@@ -870,6 +1282,7 @@ def get_business_stats_for_scope(
     try:
         config = _load_config()
         analyzer = BusinessHealthAnalyzer(config)
+        analyzer._set_model_cache(results)
         df = _get_labeled_business_df(config)
         scoped_df = _filter_business_scope(df, scope_global, scope_secondary, scope_detail, scope_city)
         # quarter filtering: pre-compute _sign_quarter for filtering before analyzer.run()
@@ -913,27 +1326,15 @@ def get_discrete_stats_for_scope(
         config = _load_config()
         df = _get_labeled_business_df(config)
         scoped_df = _filter_business_scope(df, scope_global, scope_secondary, scope_detail, scope_city)
-
-        scoped_units = set(scoped_df["申报单位"].astype(str).str.strip().unique())
-        scoped_cities = set(scoped_df["城市"].astype(str).str.strip().unique())
+        scoped_codes = _scoped_project_codes(scoped_df)
 
         discrete_json = _discrete_to_json(get_discrete_stats())
 
         all_projects = discrete_json.get("projects", [])
-        all_cities = discrete_json.get("cities", [])
-        all_subsidiaries = discrete_json.get("subsidiaries", [])
 
         filtered_projects = [
             p for p in all_projects
-            if str(p.get("申报单位", "")).strip() in scoped_units
-        ]
-        filtered_cities = [
-            c for c in all_cities
-            if str(c.get("城市", "")).strip() in scoped_cities
-        ]
-        filtered_subsidiaries = [
-            s for s in all_subsidiaries
-            if str(s.get("申报单位", s.get("名称", ""))).strip() in scoped_units
+            if str(p.get("项目编码", "")).strip() in scoped_codes
         ]
 
         # recompute grid distribution from filtered projects
@@ -946,10 +1347,47 @@ def get_discrete_stats_for_scope(
                 grid_key = f"({r_bucket},{e_bucket})"
             grid[grid_key] = grid.get(grid_key, 0) + 1
 
+        city_map = {}
+        sub_map = {}
+        for proj in filtered_projects:
+            city_name = str(proj.get("项目城市", "")).strip() or "未识别城市"
+            city_item = city_map.setdefault(city_name, {"城市": city_name, "项目数": 0})
+            city_item["项目数"] += 1
+            for key in ("合同额（亿元）", "合同总额（亿元）"):
+                city_item[key] = round(_to_float(city_item.get(key, 0.0)) + _to_float(proj.get(key, 0.0)), 2)
+            city_item["平均R"] = round(
+                (_to_float(city_item.get("平均R", 0.0)) * (city_item["项目数"] - 1) + _to_float(proj.get("R_得分", 0.0)))
+                / max(city_item["项目数"], 1),
+                2,
+            )
+            city_item["平均E"] = round(
+                (_to_float(city_item.get("平均E", 0.0)) * (city_item["项目数"] - 1) + _to_float(proj.get("E_得分", 0.0)))
+                / max(city_item["项目数"], 1),
+                2,
+            )
+            if "城市标签" not in city_item and proj.get("城市标签"):
+                city_item["城市标签"] = proj.get("城市标签")
+
+            unit_name = str(proj.get("申报单位", "")).strip() or "未识别单位"
+            sub_item = sub_map.setdefault(unit_name, {"申报单位": unit_name, "项目数": 0})
+            sub_item["项目数"] += 1
+            for key in ("合同额（亿元）", "合同总额（亿元）"):
+                sub_item[key] = round(_to_float(sub_item.get(key, 0.0)) + _to_float(proj.get(key, 0.0)), 2)
+            sub_item["平均R"] = round(
+                (_to_float(sub_item.get("平均R", 0.0)) * (sub_item["项目数"] - 1) + _to_float(proj.get("R_得分", 0.0)))
+                / max(sub_item["项目数"], 1),
+                2,
+            )
+            sub_item["平均E"] = round(
+                (_to_float(sub_item.get("平均E", 0.0)) * (sub_item["项目数"] - 1) + _to_float(proj.get("E_得分", 0.0)))
+                / max(sub_item["项目数"], 1),
+                2,
+            )
+
         return {
             "projects": filtered_projects,
-            "cities": filtered_cities,
-            "subsidiaries": filtered_subsidiaries,
+            "cities": list(city_map.values()),
+            "subsidiaries": list(sub_map.values()),
             "summary": {"total_projects": len(filtered_projects)},
             "grid_distribution": grid,
         }
@@ -968,6 +1406,83 @@ def _bucket_score(value) -> int:
     if n >= 1.67:
         return 2
     return 1
+
+
+def _rewrite_business_metric_cards(result: dict, module_id: int) -> dict:
+    if not isinstance(result, dict):
+        return result
+
+    cards = result.get("metric_cards")
+    if not isinstance(cards, list):
+        return result
+
+    fixes_by_module = {
+        3: {
+            1: ("限制投标风险", "模型2.1：限制投标规则合并", "正向得分 = (1 - 限制投标异常率) × 100"),
+            2: ("付款条件校验", "模型2.1：付款条件规则校验", "正向得分 = (1 - 付款条件异常率) × 100"),
+            3: ("无限责任条款", "模型2.4：无限责任条款穿透", "正向得分 = (1 - 无限责任条款异常率) × 100"),
+            4: ("放弃优先受偿权", "模型2.1 + 2.4：同概念条款合并", "正向得分 = (1 - 放弃优先受偿权异常率) × 100"),
+            5: ("停缓建不利", "模型2.4：停缓建不利条款", "正向得分 = (1 - 停缓建不利异常率) × 100"),
+            6: ("三证不全", "模型2.4：三证不全即开工", "正向得分 = (1 - 三证不全异常率) × 100"),
+            7: ("质保金偏高", "模型2.4：质保金比例 > 5%", "正向得分 = (1 - 质保金偏高异常率) × 100"),
+        },
+        4: {
+            0: ("A值底部亏损", "模型2.2：A值底线检测", "正向得分 = (1 - A值底部亏损异常率) × 100"),
+            1: ("效益偏差", "模型2.2：备案A值 vs 实际利润率偏差", "正向得分 = (1 - 效益偏差异常率) × 100"),
+            3: ("签约履约偏差", "模型2.5：签约 > 12个月产值转化率 < 10%", "正向得分 = (1 - 签约履约偏差异常率) × 100"),
+        },
+        5: {
+            0: ("现金保证金占用", "模型2.3：投标保证金 + 履约保证金合并", "正向得分 = (1 - 现金保证金占用异常率) × 100"),
+            2: ("联合体超额担保", "模型2.3：联合体项目履约担保 > 合同额10%", "正向得分 = (1 - 联合体超额担保异常率) × 100"),
+        },
+        6: {
+            2: ("中标签约金额偏离", "模型1.4：中标签约金额偏离", "正向得分 = (1 - 中标签约金额偏离异常率) × 100"),
+            3: ("签约逾期", "模型1.4：签约逾期规则", "正向得分 = (1 - 签约逾期异常率) × 100"),
+            4: ("凑量嫌疑", "模型1.4：短期集中签约", "正向得分 = (1 - 凑量嫌疑异常率) × 100"),
+            5: ("邀请招标比例过高", "模型1.4：邀请招标项目数 / 总数 > 70%", "正向得分 = (1 - 邀请招标比例过高异常率) × 100"),
+        },
+    }
+
+    fixes = fixes_by_module.get(module_id, {})
+    if not fixes:
+        return result
+
+    new_cards = []
+    for idx, card in enumerate(cards):
+        updated = dict(card)
+        fix = fixes.get(idx)
+        if fix:
+            name, formula, score_formula = fix
+            raw_score = float(updated.get("raw_display_value", updated.get("display_score", 0)) or 0.0)
+            anomaly_rate = max(0.0, min(raw_score, 100.0))
+            updated.update({
+                "name": name,
+                "metric_type": "risk_rate",
+                "score_mode": "issue_rate",
+                "formula": formula,
+                "score_formula": score_formula,
+                "anomaly_rate": round(anomaly_rate, 1),
+                "raw_display_value": round(raw_score, 1),
+                "display_score": round(100.0 - anomaly_rate, 1),
+            })
+        new_cards.append(updated)
+
+    result = dict(result)
+    result["metric_cards"] = new_cards
+
+    result["metric_catalog"] = [
+        {
+            "name": card.get("name", ""),
+            "type": card.get("metric_type", "risk_rate"),
+            "metric_type": card.get("metric_type", "risk_rate"),
+            "score_mode": card.get("score_mode", "issue_rate"),
+            "formula": card.get("formula", ""),
+            "score_formula": card.get("score_formula", ""),
+        }
+        for card in new_cards
+    ]
+
+    return result
 
 
 def _build_scope_options_from_stats(stats: dict) -> dict:
@@ -1149,10 +1664,14 @@ def _stage_uploaded_files():
 def _run_pipeline_subprocess(cmd, staged_count):
     global pipeline_status
     try:
+        print(_safe_console_text(f"[pipeline] starting subprocess: {subprocess.list2cmdline(cmd)}"), flush=True)
         with pipeline_lock:
             pipeline_status["progress"] = f"已就位 {staged_count} 个文件，正在运行..." if staged_count else "未检测到上传文件，使用默认文件运行..."
             pipeline_status["started_at"] = datetime.now().isoformat()
             pipeline_status["started_at_timestamp"] = time.time()
+            pipeline_status["recent_logs"] = []
+            pipeline_status["output"] = ""
+            pipeline_status["error"] = None
 
         process = subprocess.Popen(
             cmd,
@@ -1177,12 +1696,15 @@ def _run_pipeline_subprocess(cmd, staged_count):
                 if line_clean.strip():
                     print(_safe_console_text(f"  [pipeline] {line_clean[:160]}"), flush=True)
                     now = time.time()
-                    if now - last_update >= 0.2:
-                        with pipeline_lock:
+                    with pipeline_lock:
+                        pipeline_status["recent_logs"] = output_lines[-80:]
+                        pipeline_status["output"] = "\n".join(output_lines[-50:])
+                        if now - last_update >= 0.2:
                             pipeline_status["progress"] = f"[{line_count} 行] {line_clean[:120]}"
-                        last_update = now
+                            last_update = now
 
         returncode = process.wait(timeout=1800)
+        print(_safe_console_text(f"[pipeline] subprocess finished with code {returncode}"), flush=True)
 
         with pipeline_lock:
             if returncode == 0:
@@ -1213,8 +1735,10 @@ def _run_pipeline_subprocess(cmd, staged_count):
                     if completed.returncode == 0:
                         pipeline_status["error"] = None
                         pipeline_status["progress"] = "Complete"
+                        pipeline_status["recent_logs"] = output_lines[-80:]
                         pipeline_status["output"] = "\n".join(output_lines[-50:])
                     else:
+                        pipeline_status["recent_logs"] = output_lines[-80:]
                         pipeline_status["error"] = "\n".join(output_lines[-30:]) or str(exc)
                         pipeline_status["progress"] = "Error"
                 return
@@ -1237,7 +1761,13 @@ def _mark_pipeline_error(exc):
 
 @app.route("/")
 def dashboard():
-    return render_template("dashboard.html", slots=DATA_SLOTS, models=MODELS, run_action_token=RUN_ACTION_TOKEN)
+    return render_template(
+        "dashboard.html",
+        slots=DATA_SLOTS,
+        models=MODELS,
+        legacy_models=LEGACY_MODELS,
+        run_action_token=RUN_ACTION_TOKEN,
+    )
 
 
 @app.route("/issues")
@@ -1252,7 +1782,7 @@ def models_page():
 
 @app.route("/chains")
 def chains_page():
-    return render_template("chains.html", chain_stats=get_chain_stats())
+    return render_template("chains.html", chain_stats=get_chain_stats(), models=MODELS, module_model_map=MODULE_MODEL_MAP)
 
 
 @app.route("/discrete")
@@ -1296,6 +1826,17 @@ def get_scoring_rules() -> dict:
             out[display] = v
         return out
 
+    from utils.insights import MODULE_DIAGNOSIS, module_advice
+    module_insights = {}
+    for mid in range(1, 7):
+        diag = MODULE_DIAGNOSIS.get(mid, {})
+        module_insights[str(mid)] = {
+            "name": diag.get("name", f"模块{mid}"),
+            "strong": diag.get("strong", ""),
+            "steady": diag.get("steady", ""),
+            "pressure": diag.get("pressure", ""),
+            "advice": module_advice(mid),
+        }
     return {
         "module_weights": _clean_weights(bh.get("module_weights", {})),
         "score_bands": {k: v for k, v in bh.get("score_bands", {}).items() if not str(k).startswith("_")},
@@ -1312,6 +1853,7 @@ def get_scoring_rules() -> dict:
             "defences": scoring_meta.get("四大防线机制", {}),
             "types": scoring_meta.get("评分类型说明", {}),
         },
+        "module_insights": module_insights,
     }
 
 
@@ -1350,6 +1892,261 @@ def report_page():
         with open(REPORT_PATH, "r", encoding="utf-8") as file:
             report_html = _md_to_html(file.read())
     return render_template("report.html", report_html=report_html)
+
+
+def _extract_threshold_summary(level_config: dict) -> list:
+    """从 Project_Level / Company_Level 配置中提取指标阈值摘要"""
+    result = []
+    for section_key, section_val in (level_config or {}).items():
+        if str(section_key).startswith("_"):
+            continue
+        if not isinstance(section_val, dict):
+            continue
+        for ind_key, ind_val in section_val.items():
+            if str(ind_key).startswith("_"):
+                continue
+            if not isinstance(ind_val, dict):
+                continue
+            entry = {
+                "module_section": str(section_key),
+                "indicator": str(ind_key),
+                "type": ind_val.get("type", ""),
+                "is_veto": bool(ind_val.get("is_veto", False)),
+                "description": str(ind_val.get("description", "")),
+                "thresholds": [],
+            }
+            for t in ind_val.get("thresholds", []) if isinstance(ind_val.get("thresholds"), list) else []:
+                if not isinstance(t, dict):
+                    continue
+                tr = {}
+                vr = t.get("value_range", [])
+                tr["value_min"] = vr[0] if isinstance(vr, list) and len(vr) > 0 else None
+                tr["value_max"] = vr[1] if isinstance(vr, list) and len(vr) > 1 else None
+                tr["label"] = str(t.get("label", ""))
+                sr = t.get("score_range", [])
+                if isinstance(sr, list) and len(sr) > 0:
+                    tr["score_min"] = sr[0]
+                    tr["score_max"] = sr[1] if len(sr) > 1 else sr[0]
+                else:
+                    s_val = t.get("score")
+                    tr["score_min"] = s_val
+                    tr["score_max"] = s_val
+                entry["thresholds"].append(tr)
+            result.append(entry)
+    return result
+
+
+def _get_full_config_for_docs():
+    """加载 rules.json 中用于模型说明页的全量配置（评分规则+阈值+差异化基准）"""
+    config = _load_config()
+    bh = config.get("business_health", {})
+    engine = config.get("_scoring_engine_meta", {})
+    return {
+        # --- 原有评分规则 ---
+        "module_weights": bh.get("module_weights", {}),
+        "score_bands": bh.get("score_bands", {}),
+        "global_score_bands": bh.get("global_score_bands", {}),
+        "confidence_levels": bh.get("confidence_levels", {}),
+        "high_risk_threshold": bh.get("high_risk_threshold", {}),
+        "module_1": bh.get("module_1_region", {}),
+        "module_2": bh.get("module_2_customer", {}),
+        "module_3": bh.get("module_3_contract", {}),
+        "module_4": bh.get("module_4_performance", {}),
+        "module_5": bh.get("module_5_capital", {}),
+        "module_6": bh.get("module_6_data_quality", {}),
+        "scoring_engine": engine,
+        "scoring": config.get("scoring", {}),
+        "experience_warnings": config.get("experience_warnings", {}),
+        # --- 新增：阈值相关 ---
+        "score_bands_dynamic": bh.get("score_bands_dynamic", {}),
+        "strategic_plan": config.get("十五五战略规划", {}),
+        "total_score_constraints": {
+            "红线模块否决封顶": 60,
+            "合同底线穿透封顶": 50,
+            "最低模块阈值": 40,
+            "最低模块封顶": 65,
+            "双弱模块阈值": 55,
+            "双弱模块折扣": 0.85,
+        },
+        "project_level_summary": _extract_threshold_summary(config.get("Project_Level", {})),
+        "company_level_summary": _extract_threshold_summary(config.get("Company_Level", {})),
+    }
+
+
+def _get_discrete_rules():
+    """加载 discrete_rules.json"""
+    disc_path = PROJECT_ROOT / "config" / "discrete_rules.json"
+    if disc_path.exists():
+        with open(disc_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+@app.route("/scoring-rules")
+def scoring_rules_redirect():
+    return redirect(url_for('model_docs_page'), code=301)
+
+
+@app.route("/thresholds")
+def thresholds_redirect():
+    return redirect(url_for('model_docs_page'), code=301)
+
+
+@app.route("/api/thresholds/update", methods=["POST"])
+def api_thresholds_update():
+    """保存可调节的经验阈值。
+
+    接收 JSON: {"path": "experience_warnings.中标率.黄色预警", "value": 0.30}
+    或批量: {"updates": [{"path": "...", "value": ...}, ...]}
+
+    路径前缀决定写入哪个配置文件：
+    - "离散化分析.*" → config/discrete_rules.json
+    - 其他 → config/rules.json
+    """
+    ALLOWED_PREFIXES = [
+        "experience_warnings",
+        "离散化分析.风险维度.分箱阈值",
+        "离散化分析.收益维度.分箱阈值",
+        "business_health.score_bands_dynamic.历史",
+        "business_health.score_bands_dynamic.地产",
+        "business_health.score_bands.强势区下限",
+        "business_health.score_bands.稳健区下限",
+    ]
+
+    data = request.get_json(silent=True) or {}
+    updates = data.get("updates", [])
+    if not updates and "path" in data:
+        updates = [{"path": data["path"], "value": data["value"]}]
+
+    if not updates:
+        return jsonify({"ok": False, "error": "缺少 updates 或 path+value"}), 400
+
+    # 安全校验 + 按文件分组
+    rules_updates = []   # → rules.json
+    disc_updates = []    # → discrete_rules.json
+    for u in updates:
+        path = str(u.get("path", ""))
+        if not any(path.startswith(prefix) for prefix in ALLOWED_PREFIXES):
+            return jsonify({"ok": False, "error": f"不允许修改路径: {path}"}), 403
+        if path.startswith("离散化分析."):
+            disc_updates.append(u)
+        else:
+            rules_updates.append(u)
+
+    # 写入 rules.json
+    if rules_updates:
+        config = _load_config()
+        for u in rules_updates:
+            _deep_set(config, str(u["path"]).split("."), u["value"])
+        with open(PROJECT_ROOT / "config" / "rules.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+    # 写入 discrete_rules.json
+    if disc_updates:
+        disc_path = PROJECT_ROOT / "config" / "discrete_rules.json"
+        if disc_path.exists():
+            disc = json.load(open(disc_path, "r", encoding="utf-8"))
+        else:
+            disc = {}
+        for u in disc_updates:
+            _deep_set(disc, str(u["path"]).split("."), u["value"])
+        with open(disc_path, "w", encoding="utf-8") as f:
+            json.dump(disc, f, ensure_ascii=False, indent=2)
+
+    # 清除缓存结果（阈值变了，旧分数失效）
+    _clear_model_cache()
+
+    return jsonify({"ok": True, "saved": len(updates), "message": "阈值已保存，缓存已清除，请重新运行模型。"})
+
+
+def _deep_set(obj: dict, keys: list, value):
+    """按点号路径深写入字典。"""
+    for key in keys[:-1]:
+        if key not in obj:
+            obj[key] = {}
+        obj = obj[key]
+    obj[keys[-1]] = value
+
+
+def _clear_model_cache():
+    """清除模型输出缓存，强制下次重新计算。"""
+    import glob as _glob
+    patterns = [
+        str(PROJECT_ROOT / "output" / "model_outputs" / "_results.pkl"),
+        str(PROJECT_ROOT / "output" / "model_outputs" / "_business_health.pkl"),
+        str(PROJECT_ROOT / "output" / "model_outputs" / "_discrete_results.pkl"),
+    ]
+    for pat in patterns:
+        for f in _glob.glob(pat):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+@app.route("/model-docs")
+def model_docs_page():
+    rules = _get_full_config_for_docs()
+    weights = rules.get("module_weights", {})
+    module_table = []
+    for mod_key, mod_info in MODULE_MODEL_MAP.items():
+        weight_key = mod_key + "_" + mod_info["name"]
+        w = weights.get(weight_key, 0)
+        mod_idx = mod_info["id"]
+        sub_key = f"module_{mod_idx}"
+        sub_dict = rules.get(sub_key, {})
+        indicator_count = sum(1 for k in sub_dict if not str(k).startswith("_"))
+        module_table.append({
+            "key": mod_key, "name": mod_info["name"], "dim": mod_info["dim"],
+            "models": mod_info["models"], "weight": w,
+            "indicator_count": indicator_count,
+        })
+    chain_docs = {}
+    for cid, cdef in CHAIN_DEFINITIONS.items():
+        primary_modules = sorted(set(
+            MODEL_TO_MODULE.get(m, m) for m in cdef.get("primary_models", set())
+        ))
+        secondary_modules = sorted(set(
+            MODEL_TO_MODULE.get(m, m) for m in cdef.get("secondary_models", set())
+        ))
+        chain_docs[cid] = dict(cdef)
+        chain_docs[cid]["primary_modules"] = primary_modules
+        chain_docs[cid]["secondary_modules"] = secondary_modules
+    sp = rules.get("strategic_plan", {})
+    diff_units = [k for k in sp.get("二级单位差异化基准", {}).keys()
+                  if not str(k).startswith("_")]
+    # 预处理经验阈值
+    exp_raw = rules.get("experience_warnings", {})
+    exp_desc = {
+        "中标率": "中标项目数/投标项目数",
+        "中标转化率": "中标后实际签约转化率",
+        "已签约未开工项目_签约后未开工天数": "超过此天数视为异常",
+        "客户流失_连续未合作月数": "连续无合作超过此月数视为流失",
+        "战略客户拜访_年均次数下限": "年均拜访次数低于此值预警",
+        "高端拜访_局级出席率下限": "局领导出席率低于此值预警",
+        "保证金逾期_重大风险天数": "逾期超此天数视为重大风险",
+        "战略客户断崖下跌_同比降幅": "同比降幅超此值触发预警",
+        "客户集中度_前5大占比上限": "前5大客户占比超此值风险集中",
+    }
+    exp_table = []
+    for key, val in exp_raw.items():
+        yellow = ""; red = ""
+        if isinstance(val, dict):
+            yellow = val.get("黄色预警", "")
+            red = val.get("红色预警", "")
+        else:
+            red = val
+        exp_table.append({"key": key, "yellow": yellow, "red": red, "desc": exp_desc.get(key, "")})
+    return render_template(
+        "model_docs.html",
+        scoring_rules=rules,
+        discrete_rules=_get_discrete_rules(),
+        chain_documentation=chain_docs,
+        module_table=module_table,
+        strategic_plan=sp,
+        differentiated_units=diff_units,
+        experience_table=exp_table,
+    )
 
 
 @app.route("/api/stats")
@@ -1488,7 +2285,7 @@ def api_business_modules_summary():
     if any([scope_global, scope_secondary, scope_detail, scope_city]):
         business = get_business_stats_for_scope(scope_global, scope_secondary, scope_detail, scope_city)
     else:
-        business = _load_pickle(BUSINESS_PATH, {})
+        business = get_business_stats()
     if not business or not isinstance(business, dict):
         return jsonify({"total_score": 0, "modules": {}, "score_band": {}})
 
@@ -1514,7 +2311,7 @@ def api_business_module_detail(module_id):
     if any([scope_global, scope_secondary, scope_detail, scope_city, quarter]):
         business = get_business_stats_for_scope(scope_global, scope_secondary, scope_detail, scope_city, quarter)
     else:
-        business = _load_pickle(BUSINESS_PATH, {})
+        business = get_business_stats()
     if not business or not isinstance(business, dict):
         # v2.10: 缓存无数据时也下发 scope_name，供前端 Badge 展示
         return jsonify({"module_id": module_id, "module_name": f"模块{module_id}",
@@ -1524,6 +2321,7 @@ def api_business_module_detail(module_id):
     try:
         from models.business_analysis import _business_module_detail_stable
         result = _business_module_detail_stable(business, module_id)
+        result = _rewrite_business_metric_cards(result, module_id)
         gc.collect(0)
         return jsonify(result)
     except Exception as exc:
@@ -1544,7 +2342,7 @@ def api_business_benchmark(scope):
     if any([scope_global, scope_secondary, scope_detail, scope_city, quarter]):
         business = get_business_stats_for_scope(scope_global, scope_secondary, scope_detail, scope_city, quarter)
     else:
-        business = _load_pickle(BUSINESS_PATH, {})
+        business = get_business_stats()
     if not business or not isinstance(business, dict):
         return jsonify([])
 
@@ -1594,11 +2392,23 @@ def api_business_config():
     if not bh:
         return jsonify({"error": "business_health section not found in config/rules.json"}), 404
 
+    from utils.insights import MODULE_DIAGNOSIS, module_advice
+    module_insights = {}
+    for mid in range(1, 7):
+        diag = MODULE_DIAGNOSIS.get(mid, {})
+        module_insights[str(mid)] = {
+            "name": diag.get("name", f"模块{mid}"),
+            "strong": diag.get("strong", ""),
+            "steady": diag.get("steady", ""),
+            "pressure": diag.get("pressure", ""),
+            "advice": module_advice(mid),
+        }
     return jsonify({
         "module_weights": bh.get("module_weights", {}),
         "score_bands": bh.get("score_bands", {}),
         "global_score_bands": bh.get("global_score_bands", {}),
         "confidence_levels": bh.get("confidence_levels", {}),
+        "module_insights": module_insights,
         "_meta": {
             "source": "config/rules.json → business_health",
             "message": "前端所有阈值判断必须以此响应为唯一数据源，禁止硬编码",
@@ -1692,6 +2502,13 @@ def api_chains():
 @app.route("/api/model/<model_id>")
 def api_model_detail(model_id):
     results = load_cached_results()
+    # model_id 来自前端 m.id（legacy ID），直接使用，严禁 display_to_legacy_id() 逆向转换。
+    # 若传入的是 display ID（如 URL 直链），先尝试正向匹配再回退。
+    if model_id not in results:
+        from utils.model_registry import display_to_legacy_id as _dtl
+        resolved = _dtl(model_id)
+        if resolved != model_id and resolved in results:
+            model_id = resolved
     if model_id not in results:
         return jsonify({"error": "Model not found"}), 404
 
@@ -1714,7 +2531,15 @@ def api_model_detail(model_id):
                 record[str(col)] = str(value) if value is not None else None
         rows.append(record)
 
-    return jsonify({"columns": [str(c) for c in df.columns], "rows": rows, "summary": {str(k): v for k, v in summary.items()}})
+    return jsonify(
+        {
+            "model_id": model_id,
+            "display_id": legacy_to_display_id(model_id),
+            "columns": [str(c) for c in df.columns],
+            "rows": rows,
+            "summary": {str(k): v for k, v in summary.items()},
+        }
+    )
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -1902,18 +2727,6 @@ def api_uploaded_files():
                     }
                     break
 
-        if found is None:
-            for path in candidate_paths:
-                if not path.exists():
-                    continue
-                found = {
-                    "filename": path.name,
-                    "saved_as": path.name,
-                    "size": path.stat().st_size,
-                    "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
-                }
-                break
-
         slots_status[key] = {
             "label": info["label"],
             "desc": info["desc"],
@@ -1962,7 +2775,7 @@ def api_reset_session():
         )
     data = request.get_json(silent=True) or {}
     if data.get("clear_uploads") is True:
-        clear_uploaded_files()
+        clear_uploaded_files_safe()
     clear_runtime_outputs()
     return jsonify({"status": "ok"})
 
@@ -1992,7 +2805,12 @@ def api_run_prefilter():
     def _run():
         try:
             staged = _stage_uploaded_files()
-            cmd = [sys.executable, str(PROJECT_ROOT / "main.py"), "--prefilter-only", "--output-dir", str(OUTPUT_DIR)]
+            cmd = _resolve_python_command() + [
+                str(PROJECT_ROOT / "main.py"),
+                "--prefilter-only",
+                "--output-dir",
+                str(OUTPUT_DIR),
+            ]
             _run_pipeline_subprocess(cmd, len(staged))
             with pipeline_lock:
                 ok = not pipeline_status.get("error")
@@ -2024,7 +2842,7 @@ def api_run():
     if not PREFILTER_PATH.exists():
         return jsonify({"error": "请先运行前置过滤层，确认过滤结果后再执行模型"}), 400
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     selected_models = data.get("models", [])
     if not selected_models:
         return jsonify({"error": "No models selected"}), 400
@@ -2054,7 +2872,13 @@ def api_run():
     def _run():
         try:
             copied = _stage_uploaded_files()
-            cmd = [sys.executable, str(PROJECT_ROOT / "main.py"), "--model", ",".join(selected_models), "--output-dir", str(OUTPUT_DIR)]
+            cmd = _resolve_python_command() + [
+                str(PROJECT_ROOT / "main.py"),
+                "--model",
+                ",".join(selected_models),
+                "--output-dir",
+                str(OUTPUT_DIR),
+            ]
             _run_pipeline_subprocess(cmd, len(copied))
         except Exception as exc:
             _mark_pipeline_error(exc)
@@ -2077,13 +2901,16 @@ def api_status():
 
 @app.route("/api/runtime-check")
 def api_runtime_check():
+    cache_path = _latest_existing_path(CACHE_PATH, "*/output/model_outputs/_all_results.pkl")
+    discrete_path = _latest_existing_path(DISCRETE_PATH, "*/output/model_outputs/_discrete_results.pkl")
+    business_path = _latest_existing_path(BUSINESS_PATH, "*/output/model_outputs/_business_results.pkl")
     return jsonify(
         {
             "project_root": str(PROJECT_ROOT),
             "uploads_ready": required_uploads_ready(),
-            "cache_exists": CACHE_PATH.exists(),
-            "discrete_exists": DISCRETE_PATH.exists(),
-            "business_exists": BUSINESS_PATH.exists(),
+            "cache_exists": cache_path.exists(),
+            "discrete_exists": discrete_path.exists(),
+            "business_exists": business_path.exists(),
         }
     )
 
@@ -2281,4 +3108,6 @@ if __name__ == "__main__":
     print("  服务启动中...", flush=True)
     print("  访问地址: http://localhost:5001", flush=True)
     print("=" * 60, flush=True)
+    if not _ensure_startup_port_ready(5001):
+        sys.exit(1)
     app.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False)

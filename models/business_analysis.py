@@ -21,6 +21,55 @@ import pandas as pd
 from utils.helpers import safe_float
 from utils.strategic_scope import detect_strategic_scope
 
+DISPLAY_METRIC_CATALOG = {
+    1: [
+        {"name": "跨区域经营合规", "type": "independent_score", "score_mode": "issue_rate", "formula": "模型1.1：窜区 + 非常规区域未达门槛合并", "score_formula": "正向得分 = (1 - 合规异常项目占比) × 100"},
+        {"name": "区域覆盖质量", "type": "module_proxy", "score_mode": "module_proxy", "formula": "模型1.1：深耕区域占比 + 授权城市覆盖合并", "score_formula": "沿用模块一审计综合分（待拆分独立评分）"},
+        {"name": "业务结构偏离", "type": "independent_score", "score_mode": "target_score", "formula": "模型1.2：六大板块实际占比 vs 155年度目标", "score_formula": "正向得分 = 业务结构对齐度 × 100"},
+        {"name": "EPC转型进度", "type": "independent_score", "score_mode": "target_score", "formula": "模型1.2：EPC项目合同额占比 vs 50%目标", "score_formula": "正向得分 = min(EPC占比 / 50%, 1) × 100"},
+        {"name": "战略新兴业务缺口", "type": "independent_score", "score_mode": "composite_score", "formula": "模型1.2：城市更新占比 + 新兴业务占比合并", "score_formula": "综合得分 = 城市更新得分 × 50% + 新兴业务得分 × 50%"},
+        {"name": "区域发展偏离", "type": "module_proxy", "score_mode": "module_proxy", "formula": "模型1.2：四大区域实际占比 vs 155区域目标", "score_formula": "沿用模块一审计综合分（当前为模块代理分）"},
+    ],
+    2: [
+        {"name": "客户集中度综合", "type": "independent_score", "score_mode": "composite_score", "formula": "模型1.3 + 3.2：前5大客户集中度 + 行业HHI", "score_formula": "综合得分 = 前5大客户得分 × 60% + HHI得分 × 40%"},
+        {"name": "战略客户管理", "type": "independent_score", "score_mode": "target_score", "formula": "模型1.3：战略客户合同额占比", "score_formula": "正向得分 = min(战略客户合同额占比 / 35%, 1) × 100"},
+        {"name": "优质客户占比", "type": "independent_score", "score_mode": "target_score", "formula": "模型1.3：优质客户合同额占比", "score_formula": "正向得分 = min(优质客户合同额占比 / 35%, 1) × 100"},
+        {"name": "中标转化异常", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型3.1：中标未签约客户占比", "score_formula": "正向得分 = (1 - 中标未签约客户占比) × 100"},
+        {"name": "客户活跃度异常", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型3.1/3.3：流失客户 + 僵尸客户 + 优质僵尸客户占比", "score_formula": "正向得分 = (1 - 客户活跃异常占比) × 100"},
+        {"name": "新客户结构质量", "type": "independent_score", "score_mode": "composite_score", "formula": "模型3.2：政府/国企新客户占比 + 地产依赖合并", "score_formula": "综合得分 = 政府/国企得分 × 50% + 地产依赖得分 × 50%"},
+    ],
+    3: [
+        {"name": "严禁投标红线集", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：红线项目占比", "score_formula": "正向得分 = (1 - 红线项目占比) × 100"},
+        {"name": "限制投标风险", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：限制投标规则合并", "score_formula": "正向得分 = (1 - 限制投标异常率) × 100"},
+        {"name": "付款条件校验", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：付款条件规则校验", "score_formula": "正向得分 = (1 - 付款条件异常率) × 100"},
+        {"name": "无限责任条款", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：无限责任条款穿透", "score_formula": "正向得分 = (1 - 无限责任条款异常率) × 100"},
+        {"name": "放弃优先受偿权", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1 + 2.4：同概念条款合并", "score_formula": "正向得分 = (1 - 放弃优先受偿权异常率) × 100"},
+        {"name": "停缓建不利", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：停缓建不利条款", "score_formula": "正向得分 = (1 - 停缓建不利异常率) × 100"},
+        {"name": "三证不全", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：三证不全即开工", "score_formula": "正向得分 = (1 - 三证不全异常率) × 100"},
+        {"name": "质保金偏高", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：质保金比例 > 5%", "score_formula": "正向得分 = (1 - 质保金偏高异常率) × 100"},
+    ],
+    4: [
+        {"name": "A值底部亏损", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：A值底线检测", "score_formula": "正向得分 = (1 - A值底部亏损异常率) × 100"},
+        {"name": "效益偏差", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：备案A值 vs 实际利润率偏差", "score_formula": "正向得分 = (1 - 效益偏差异常率) × 100"},
+        {"name": "施工真实性异常", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：停工/退场/停缓建异常占比", "score_formula": "正向得分 = (1 - 停工退场率) × 100"},
+        {"name": "签约履约偏差", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：签约 > 12个月产值转化率 < 10%", "score_formula": "正向得分 = (1 - 签约履约偏差异常率) × 100"},
+    ],
+    5: [
+        {"name": "现金保证金占用", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：投标保证金 + 履约保证金合并", "score_formula": "正向得分 = (1 - 现金保证金占用异常率) × 100"},
+        {"name": "资金逾期回收", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：保证金逾期 + 预收款逾期占比", "score_formula": "正向得分 = (1 - 逾期回收率) × 100"},
+        {"name": "联合体超额担保", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：联合体项目履约担保 > 合同额10%", "score_formula": "正向得分 = (1 - 联合体超额担保异常率) × 100"},
+        {"name": "资金负流", "type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：负流项目占比", "score_formula": "正向得分 = (1 - 负流项目占比) × 100"},
+    ],
+    6: [
+        {"name": "流程时间倒置", "type": "independent_score", "score_mode": "issue_rate", "formula": "模型1.4：流程合规率", "score_formula": "正向得分 = 流程合规率 × 100"},
+        {"name": "利润率规律异常", "type": "independent_score", "score_mode": "issue_rate", "formula": "模型1.4：测算规律性指数", "score_formula": "正向得分 = 测算规律性指数 × 100"},
+        {"name": "中标签约金额偏离", "type": "module_proxy", "formula": "模型1.4：中标签约金额偏离", "score_formula": "沿用模块六审计综合分"},
+        {"name": "签约逾期", "type": "module_proxy", "formula": "模型1.4：签约逾期规则", "score_formula": "沿用模块六审计综合分"},
+        {"name": "凑量嫌疑", "type": "module_proxy", "formula": "模型1.4：短期集中签约", "score_formula": "沿用模块六审计综合分"},
+        {"name": "邀请招标比例过高", "type": "module_proxy", "formula": "模型1.4：邀请招标项目数 / 总数 > 70%", "score_formula": "沿用模块六审计综合分"},
+    ],
+}
+
 
 @dataclass
 class ModuleScore:
@@ -55,7 +104,7 @@ class BusinessHealthAnalyzer:
         # 模块五：资金效率 —— 资金负流是致命信号
         5: ["负流项目占比", "逾期回收率"],
         # 模块六：数据质量 —— 数据大面积缺失时信不过其他模块的分数
-        6: ["数据完整率"],
+        6: ["流程合规率", "测算规律性指数"],  # v4.0: 模块六红线改为时间倒置+规律异常
     }
     # 红线触发阈值：指标得分低于此值时视为触碰红线
     REDLINE_THRESHOLD = 0.10  # 0-1 范围内
@@ -263,6 +312,99 @@ class BusinessHealthAnalyzer:
     def _detect_strategic_scope(self, df: pd.DataFrame) -> dict:
         """自动探针路由：行政架构优先，名称别名仅兜底。"""
         return detect_strategic_scope(df, self._config if hasattr(self, "_config") else {})
+
+    def _compute_strategic_customer_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "客户名称" not in df.columns or "签约额（元）" not in df.columns:
+            return 0.0
+        try:
+            from models.dim1.model_1_3_strategic_customer import _get_strategic_set
+        except Exception:
+            return 0.0
+        strategic_set = _get_strategic_set(2026)
+        if not strategic_set:
+            return 0.0
+        total_amt = df["签约额（元）"].apply(safe_float).sum()
+        if total_amt <= 0:
+            return 0.0
+        strategic_amt = df[df["客户名称"].isin(strategic_set)]["签约额（元）"].apply(safe_float).sum()
+        return _safe_percent_score(strategic_amt / total_amt, 0.35)
+
+    def _compute_quality_customer_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "是否优质客户" not in df.columns or "签约额（元）" not in df.columns:
+            return 0.0
+        total_amt = df["签约额（元）"].apply(safe_float).sum()
+        if total_amt <= 0:
+            return 0.0
+        quality_amt = df[df["是否优质客户"].astype(str).str.strip() == "是"]["签约额（元）"].apply(safe_float).sum()
+        return _safe_percent_score(quality_amt / total_amt, 0.35)
+
+    def _compute_epc_progress_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "签约额（元）" not in df.columns:
+            return 0.0
+        total_amt = df["签约额（元）"].apply(safe_float).sum()
+        if total_amt <= 0 or "项目模式类型" not in df.columns:
+            return 0.0
+        epc_kw = ["EPC", "工程总承包", "设计施工总承包", "设计采购施工"]
+        epc_mask = df["项目模式类型"].astype(str).str.contains("|".join(epc_kw), na=False, regex=True)
+        epc_amt = df.loc[epc_mask, "签约额（元）"].apply(safe_float).sum()
+        return _safe_percent_score(epc_amt / total_amt, 0.50)
+
+    def _compute_emerging_business_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "签约额（元）" not in df.columns:
+            return 0.0
+        total_amt = df["签约额（元）"].apply(safe_float).sum()
+        if total_amt <= 0:
+            return 0.0
+        combined = pd.Series("", index=df.index)
+        for col in ["业务类型", "工程类别", "工程类别（原总公司市场口径）", "项目分类"]:
+            if col in df.columns:
+                combined = combined + " " + df[col].astype(str)
+        urban_mask = pd.Series(False, index=df.index)
+        if "是否城市更新" in df.columns:
+            urban_mask = df["是否城市更新"].astype(str).str.strip().eq("是")
+        urban_kw = ["城市更新", "城市更新与运营", "老旧改造", "城中村", "老旧小区", "既有建筑", "片区运营"]
+        urban_mask = urban_mask | combined.str.contains("|".join(urban_kw), na=False, regex=True)
+        emerging_kw = ["新兴业务", "建筑工业化", "装配式", "模块化", "MiC", "CF-MiC", "绿色建材", "双碳"]
+        emerging_mask = combined.str.contains("|".join(emerging_kw), na=False, regex=True)
+        urban_amt = df.loc[urban_mask, "签约额（元）"].apply(safe_float).sum()
+        emerging_amt = df.loc[emerging_mask, "签约额（元）"].apply(safe_float).sum()
+        urban_score = _safe_percent_score(urban_amt / total_amt, 0.05)
+        emerging_score = _safe_percent_score(emerging_amt / total_amt, 0.05)
+        return round(urban_score * 0.5 + emerging_score * 0.5, 1)
+
+    def _compute_customer_concentration_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "客户名称" not in df.columns or "签约额（元）" not in df.columns:
+            return 0.0
+        customer_amt = df.groupby("客户名称")["签约额（元）"].apply(lambda x: x.apply(safe_float).sum()).sort_values(ascending=False)
+        total_amt = customer_amt.sum()
+        if total_amt <= 0:
+            return 0.0
+        top5_share = customer_amt.head(5).sum() / total_amt
+        top5_score = _reverse_risk_score(max(0.0, (top5_share - 0.60) / 0.40))
+        hhi_score = 100.0
+        if "客户性质" in df.columns:
+            type_amt = df.groupby("客户性质")["签约额（元）"].apply(lambda x: x.apply(safe_float).sum())
+            typed_total = type_amt.sum()
+            if typed_total > 0:
+                hhi = float(((type_amt / typed_total) ** 2).sum())
+                hhi_score = _reverse_risk_score(max(0.0, (hhi - 0.50) / 0.50))
+        return round(top5_score * 0.6 + hhi_score * 0.4, 1)
+
+    def _compute_new_customer_quality_score(self, df: pd.DataFrame) -> float:
+        if df is None or df.empty or "是否首次合作" not in df.columns:
+            return 0.0
+        new_df = df[df["是否首次合作"].astype(str).str.strip().eq("是")].copy()
+        if new_df.empty:
+            return 100.0
+        gov_score = 100.0
+        if "客户性质" in new_df.columns:
+            gov_mask = new_df["客户性质"].astype(str).str.contains("政府|国企|事业", na=False, regex=True)
+            gov_score = _safe_percent_score(gov_mask.mean(), 0.50)
+        re_score = 100.0
+        if "是否地产类项目" in new_df.columns:
+            re_share = new_df["是否地产类项目"].astype(str).str.strip().eq("是").mean()
+            re_score = _reverse_risk_score(max(0.0, (re_share - 0.50) / 0.50))
+        return round(gov_score * 0.5 + re_score * 0.5, 1)
 
     def _fallback_global_scope(self) -> dict:
         """优雅降级：无法识别时使用局级全局基准."""
@@ -612,54 +754,64 @@ class BusinessHealthAnalyzer:
             "签约额（亿元）": round(total_contract / 1e8, 2),
             "综合得分": round(total_score, 1),
 
-            # ── 模块一：区域布局健康度（6指标）──
+            # ── 模块一：区域布局（v4.0 模型驱动）──
             "模块一_得分": round(m1.score * 100, 1),
-            "区域渗透率": round(m1.metrics["region_penetration_rate"] * 100, 1),
-            "跨区域经营指数": round(m1.metrics["cross_region_contract_ratio"] * 100, 1),
-            "深耕区域集中度": round(m1.metrics["deep_region_ratio"] * 100, 1),
-            "区域合同额强度": round(m1.metrics["contract_intensity"] / 1e8, 2),
-            "业务结构偏离度": round(m1.metrics.get("business_deviation", 0) * 100, 1),
-            "EPC转型进度": round(m1.metrics.get("epc_ratio", 0) * 100, 1),
+            "模型驱动评分_1": round(m1.metrics.get("model_driven_score", 0) * 100, 1),
+            # v4.0 合并指标（与前端 MODULE_METRIC_NAMES 对齐）
+            "跨区域经营合规": round(m1.metrics.get("跨区域经营合规", m1.metrics.get("model_driven_score", 0)), 1),
+            "区域覆盖质量": round(m1.metrics.get("model_driven_score", 0) * 100, 1),
+            "业务结构偏离": round(m1.metrics.get("业务结构偏离", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "EPC转型进度": round(m1.metrics.get("EPC转型进度", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "战略新兴业务缺口": round(m1.metrics.get("战略新兴业务缺口", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "区域发展偏离": round(m1.metrics.get("model_driven_score", 0) * 100, 1),
 
-            # ── 模块二：客户资源稳定性（6指标）──
+            # ── 模块二：客户稳定（v4.0 模型驱动）──
             "模块二_得分": round(m2.score * 100, 1),
-            "客户稳定性指数": round(m2.metrics["customer_stability_index"] * 100, 1),
-            "客户产出波动率": round(m2.metrics.get("customer_volatility", 0) * 100, 1),
-            "客户集中度风险": round(m2.metrics["top5_customer_share"] * 100, 1),
-            "中标转化率": round(m2.metrics.get("bid_conversion_rate", 0) * 100, 1),
-            "新客户质量指数": round(m2.metrics.get("new_customer_quality", 0) * 100, 1),
-            "战略客户产出比": round(m2.metrics["quality_customer_share"] * 100, 1),
+            "模型驱动评分_2": round(m2.metrics.get("model_driven_score", 0) * 100, 1),
+            "客户集中度综合": round(m2.metrics.get("客户集中度综合", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "战略客户管理": round(m2.metrics.get("战略客户管理", m2.metrics.get("model_driven_score", 0)), 1),
+            "优质客户占比": round(m2.metrics.get("优质客户占比", m2.metrics.get("model_driven_score", 0)), 1),
+            "中标转化异常": round(m2.metrics.get("model_driven_score", 0) * 100, 1),
+            "客户活跃度异常": round(m2.metrics.get("model_driven_score", 0) * 100, 1),
+            "新客户结构质量": round(m2.metrics.get("新客户结构质量", m2.metrics.get("model_driven_score", 0) * 100), 1),
 
-            # ── 模块三：合同质量与风险集中度（5指标）──
+            # ── 模块三：合同质量（v4.0 模型驱动）──
             "模块三_得分": round(m3.score * 100, 1),
-            "风险项目占比": round(m3.metrics["risk_project_ratio"] * 100, 1),
-            "风险合同额集中度": round(m3.metrics["risk_contract_ratio"] * 100, 1),
-            "付款条件优良率": round(m3.metrics.get("payment_compliance_rate", 0) * 100, 1),
-            "合同条款不利度": round(m3.metrics.get("clause_risk_ratio", 0) * 100, 1),
-            "三证合规率": round(m3.metrics.get("permit_compliance_rate", 0) * 100, 1),
+            "模型驱动评分_3": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "严禁投标红线集": round(m3.metrics.get("风险项目占比", 0) * 100, 1),
+            "限制投标风险": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "付款条件校验": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "无限责任条款": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "放弃优先受偿权": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "停缓建不利": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "三证不全": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
+            "质保金偏高": round(m3.metrics.get("model_driven_score", 0) * 100, 1),
 
-            # ── 模块四：履约盈利健康度（4指标）──
+            # ── 模块四：履约盈利（v4.0 模型驱动）──
             "模块四_得分": round(m4.score * 100, 1),
-            "盈利健康度": round(m4.metrics["healthy_profit_ratio"] * 100, 1),
-            "停工退场率": round(m4.metrics["stopped_project_ratio"] * 100, 1),
-            "效益偏差率": round(m4.metrics.get("profit_deviation_ratio", 0) * 100, 1),
-            "在施项目活跃度": round(m4.metrics.get("active_project_ratio", 0) * 100, 1),
+            "模型驱动评分_4": round(m4.metrics.get("model_driven_score", 0) * 100, 1),
+            "A值底部亏损": round(m4.metrics.get("model_driven_score", 0) * 100, 1),
+            "效益偏差": round(m4.metrics.get("model_driven_score", 0) * 100, 1),
+            "施工真实性异常": round(m4.metrics.get("停工退场率", 0) * 100, 1),
+            "签约履约偏差": round(m4.metrics.get("model_driven_score", 0) * 100, 1),
 
-            # ── 模块五：资金效率与安全性（5指标）──
+            # ── 模块五：资金效率（v4.0 模型驱动）──
             "模块五_得分": round(m5.score * 100, 1),
-            "资金占用率": round(m5.metrics.get("capital_occupancy_rate", 0) * 100, 1),
-            "保证金周转天数": round(m5.metrics.get("deposit_turnover_days", 0), 1),
-            "逾期回收率": round(m5.metrics.get("overdue_recovery_rate", 0) * 100, 1),
-            "预收款缺口率": round(m5.metrics.get("advance_shortfall_rate", 0) * 100, 1),
-            "负流项目占比": round(m5.metrics.get("negative_flow_ratio", 0) * 100, 1),
+            "模型驱动评分_5": round(m5.metrics.get("model_driven_score", 0) * 100, 1),
+            "现金保证金占用": round(m5.metrics.get("model_driven_score", 0) * 100, 1),
+            "资金逾期回收": round(m5.metrics.get("逾期回收率", 0) * 100, 1),
+            "联合体超额担保": round(m5.metrics.get("model_driven_score", 0) * 100, 1),
+            "资金负流": round(m5.metrics.get("负流项目占比", 0) * 100, 1),
 
-            # ── 模块六：数据质量与流程效率（5指标）──
+            # ── 模块六：数据质量（v4.0 模型驱动）──
             "模块六_得分": round(m6.score * 100, 1),
-            "数据完整率": round(m6.metrics["data_completeness"] * 100, 1),
-            "流程合规率": round(m6.metrics["process_compliance"] * 100, 1),
-            "中标签约偏差率": round(m6.metrics["bid_sign_deviation"] * 100, 1),
-            "测算规律性指数": round(m6.metrics["estimation_regularity"] * 100, 1),
-            "签约延迟率": round(m6.metrics["sign_delay_ratio"] * 100, 1),
+            "模型驱动评分_6": round(m6.metrics.get("model_driven_score", 0) * 100, 1),
+            "流程时间倒置": round(m6.metrics.get("流程合规率", m6.score) * 100, 1),
+            "利润率规律异常": round(m6.metrics.get("测算规律性指数", 0) * 100, 1),
+            "中标签约金额偏离": round(m6.metrics.get("model_driven_score", 0) * 100, 1),
+            "签约逾期": round(m6.metrics.get("model_driven_score", 0) * 100, 1),
+            "凑量嫌疑": round(m6.metrics.get("model_driven_score", 0) * 100, 1),
+            "邀请招标比例过高": round(m6.metrics.get("model_driven_score", 0) * 100, 1),
 
             # 诊断
             "经营诊断": self._diagnose(total_score, m1, m2, m3, m4, m5, m6),
@@ -740,123 +892,183 @@ class BusinessHealthAnalyzer:
 
         return constrained_score, reasons
 
+    # ═══════════════════════════════════════════════════════════
+    # v4.0 模型驱动评分辅助方法
+    # ═══════════════════════════════════════════════════════════
+
+    def _gather_module_issues(self, model_ids: list) -> pd.DataFrame:
+        """从模型缓存中聚合指定模型的全部issues."""
+        frames = []
+        for mid in model_ids:
+            df = self._get_model_df(mid)
+            if df is not None and len(df) > 0:
+                frames.append(df)
+        if frames:
+            return pd.concat(frames, ignore_index=True)
+        return pd.DataFrame()
+
+    def _score_from_issues(self, issues: pd.DataFrame, total_projects: int,
+                           total_contract: float) -> float:
+        """v4.0 归一化扣分制：从issues计算0-1得分.
+
+        校准参数（可在config/rules.json → scoring 中调整）：
+          penalty_scale=20: 控制每项目平均扣分的灵敏度
+            1 red/100项目→约94分, 1 red/10项目→约40分
+            5 yellow/20项目→约75分, 3 red+5 yellow/50项目→约54分
+          single_issue_cap=30: 单条issue最大扣分，防止单一超大合同拉到底
+        """
+        if issues.empty or total_projects == 0:
+            return 1.0
+
+        total_penalty = 0.0
+        penalty_scale = 20.0   # 每单位每项目平均扣分灵敏度
+        single_issue_cap = 30.0
+
+        for _, row in issues.iterrows():
+            severity = str(row.get("严重等级", "yellow"))
+            amount = safe_float(row.get("签约额（元）", 0))
+            amount_ratio = amount / total_contract if total_contract > 0 else 0.0
+
+            if "严禁投标" in severity or severity == "red":
+                base, sev_mult = 15, 2.0
+            elif "限制投标" in severity:
+                base, sev_mult = 8, 1.0
+            else:
+                base, sev_mult = 5, 1.0
+
+            penalty = base * sev_mult * (1.0 + min(amount_ratio, 1.0))
+            total_penalty += min(penalty, single_issue_cap)
+
+        avg_penalty_per_project = total_penalty / total_projects
+        score = 1.0 - min(avg_penalty_per_project * penalty_scale / 100.0, 1.0)
+        return max(0.0, score)
+
+    def _compute_redline_ratios(self, module_id: int, issues: pd.DataFrame,
+                                 total_projects: int, total_contract: float) -> dict:
+        """从issues重新推导红线比率（替代旧DMP手算），走_apply_redline_veto管道."""
+        red_mask = issues["严重等级"].str.contains("严禁投标|red", na=False)
+        red_issues = issues[red_mask]
+
+        red_project_codes = set()
+        if "项目编码" in red_issues.columns and not red_issues.empty:
+            red_project_codes = set(red_issues["项目编码"].dropna().unique())
+
+        red_contract = 0.0
+        if "签约额（元）" in red_issues.columns and not red_issues.empty:
+            red_contract = red_issues["签约额（元）"].apply(safe_float).sum()
+
+        def _count_type(pattern, severity_filter=None):
+            mask = issues["问题分类"].str.contains(pattern, na=False)
+            if severity_filter:
+                mask &= issues["严重等级"].str.contains(severity_filter, na=False)
+            return mask.sum()
+
+        if module_id == 3:
+            return {
+                "风险项目占比": min(len(red_project_codes) / max(total_projects, 1), 1.0),
+                "风险合同额集中度": min(red_contract / max(total_contract, 1), 1.0),
+            }
+        elif module_id == 4:
+            stop_count = _count_type("停工退场停缓建预警", "red")
+            return {"停工退场率": min(stop_count / max(total_projects, 1), 1.0)}
+        elif module_id == 5:
+            overdue_count = _count_type("保证金逾期|预收款逾期", "red")
+            negflow_count = _count_type("资金负流")
+            return {
+                "逾期回收率": min(overdue_count / max(total_projects, 1), 1.0),
+                "负流项目占比": min(negflow_count / max(total_projects, 1), 1.0),
+            }
+        elif module_id == 6:
+            reversal_count = _count_type("倒置|时序|顺序")
+            pattern_count = _count_type("规律性异常")
+            return {
+                "流程合规率": 1.0 - min(reversal_count / max(total_projects, 1), 1.0),
+                "测算规律性指数": 1.0 - min(pattern_count / max(total_projects, 1), 1.0),
+            }
+        return {}
+
+    # ═══════════════════════════════════════════════════════════
+    # 模块一：区域布局健康度（v4.0: 模型1.1 + 1.2 驱动）
+    # ═══════════════════════════════════════════════════════════
+
     def _module_1_region(self, group, project_codes, issue_index, total_contract):
-        """模块一：区域布局健康度 — 6个指标."""
-        actual_cities = {v for v in group["_project_city_norm"].tolist() if v and v != "nan"}
+        """模块一：区域布局健康度 — 6个合并指标，全部来自模型1.1+1.2."""
+        total_projects = len(group)
+        issues = self._gather_module_issues(["1.1", "1.2"])
 
-        # ① 区域渗透率
-        authorized_cities = set()
-        if "授权城市" in group.columns:
-            for val in group["授权城市"].dropna():
-                authorized_cities.update(c.strip() for c in str(val).split(",") if c.strip() and c.strip() != "nan")
-        penetration = min(len(actual_cities) / max(len(authorized_cities), 1), 1.0) if actual_cities else 0.0
+        # 按scope过滤issues（仅保留本group的项目）
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
 
-        # ② 跨区域经营指数（模型1.1窜区项目的合同额占比）
-        cross_region_amt = self._issue_amount_for_projects(group, project_codes, issue_index, {"1.1"})
-        cross_region_ratio = cross_region_amt / total_contract if total_contract > 0 else 0.0
+        score = self._score_from_issues(issues, total_projects, total_contract)
 
-        # ③ 深耕区域集中度
-        deep_cities = set()
-        if "核心城市" in group.columns:
-            deep_cities = {c.strip() for val in group["核心城市"].dropna()
-                          for c in str(val).split(",") if c.strip() and c.strip() != "nan"}
-        deep_ratio = len(actual_cities & deep_cities) / max(len(actual_cities), 1) if actual_cities else 0.0
+        # 红线比率
+        redline = self._compute_redline_ratios(1, issues, total_projects, total_contract)
 
-        # ④ 区域合同额强度（单城市平均合同额，亿元）
-        contract_intensity = (total_contract / max(len(actual_cities), 1)) if actual_cities else 0.0
+        compliance_risk = _parse_issue_ratio(
+            issues,
+            set(project_codes),
+            ["窜区", "非常规区域未达门槛"],
+        )
 
-        # ⑤ 业务结构偏离度（v2.10: 使用155探针路由+实际板块签约额计算）
-        scope = self._strategic_scope if self._strategic_scope else {
-            "target_dict": {}, "tolerance": 0.05, "scope_name": "四局全局155基准"
+        strategic_scope = self._strategic_scope or {}
+        target_dict = strategic_scope.get("target_dict", {})
+        tolerance = strategic_scope.get("tolerance", 0.05)
+        not_applicable = strategic_scope.get("not_applicable") or []
+
+        metrics = {
+            "model_driven_score": score,
+            "跨区域经营合规": _reverse_risk_score(compliance_risk),
+            "业务结构偏离": round(self._calc_business_structure_deviation(group, target_dict, tolerance, not_applicable) * 100, 1),
+            "EPC转型进度": self._compute_epc_progress_score(group),
+            "战略新兴业务缺口": self._compute_emerging_business_score(group),
         }
-        biz_dev = 1.0 - self._calc_business_structure_deviation(
-            group, scope.get("target_dict", {}), scope.get("tolerance", 0.05),
-            not_applicable=scope.get("not_applicable", [])
-        )
+        metrics.update(redline)
 
-        # ⑥ EPC转型进度
-        epc_count = 0
-        if "工程类别" in group.columns:
-            epc_count = group["工程类别"].astype(str).str.contains("EPC", na=False).sum()
-        epc_ratio = epc_count / max(len(group), 1)
-
-        score = (penetration * self.W1["区域渗透率"] + (1 - min(cross_region_ratio, 1.0)) * self.W1["跨区域经营指数_逆向"]
-                 + deep_ratio * self.W1["深耕区域集中度"] + min(contract_intensity / 5e8, 1.0) * self.W1["区域合同额强度"]
-                 + (1 - biz_dev) * self.W1["业务结构偏离度"] + epc_ratio * self.W1["EPC转型进度"])
-
-        return ModuleScore(
-            score=max(0.0, min(1.0, score)),
-            metrics={
-                "region_penetration_rate": penetration,
-                "cross_region_contract_ratio": cross_region_ratio,
-                "deep_region_ratio": deep_ratio,
-                "contract_intensity": contract_intensity,
-                "business_deviation": biz_dev,
-                "epc_ratio": epc_ratio,
-            },
-        )
+        return ModuleScore(score=max(0.0, min(1.0, score)), metrics=metrics)
 
     # ═══════════════════════════════════════════════════════════
     # 模块二：客户资源稳定性（基于模型1.3 + 3.1 + 3.2）
     # ═══════════════════════════════════════════════════════════
 
     def _module_2_customer(self, group, project_codes, issue_index, total_contract, customer_count):
-        """模块二：客户资源稳定性 — 6个指标."""
-        # ① 客户稳定性指数 & ② 客户产出波动率（基于模型3.1客户流失数据）
-        m31_df = self._get_model_df("3.1")
-        lost_customers = set()
-        if len(m31_df) > 0 and "客户名称" in m31_df.columns:
-            cust_issues = self._filter_model_df_by_project_codes(m31_df, project_codes)
-            cats = cust_issues["问题分类"].astype(str)
-            lost_customers = set(cust_issues[cats.str.contains("流失|僵尸", na=False)]["客户名称"].astype(str))
-        total_customers = max(customer_count, 1)
-        stability_index = 1.0 - len(lost_customers) / total_customers
+        """模块二：客户资源稳定性 — v4.0: 模型1.3+3.1+3.2 驱动."""
+        total_projects = len(group)
+        issues = self._gather_module_issues(["1.3", "3.1", "3.2"])
 
-        # 客户产出波动率（简化：用客户合同额标准差/均值）
-        cust_amt_series = group.groupby("_customer_name")["_contract_amt"].sum() if "_customer_name" in group.columns else pd.Series(dtype=float)
-        volatility = cust_amt_series.std() / cust_amt_series.mean() if len(cust_amt_series) > 1 and cust_amt_series.mean() > 0 else 0.0
-        volatility = min(volatility, 1.0)
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
+        elif not issues.empty and "客户名称" in issues.columns:
+            custs_in_scope = set(group["_customer_name"].dropna().astype(str))
+            issues = issues[issues["客户名称"].astype(str).isin(custs_in_scope)]
 
-        # ③ 客户集中度风险（前5大客户合同额占比）
-        top5_share = cust_amt_series.head(5).sum() / total_contract if total_contract > 0 and not cust_amt_series.empty else 0.0
+        score = self._score_from_issues(issues, total_projects, total_contract)
+        customer_names = set(group["_customer_name"].dropna().astype(str))
+        conversion_risk = _parse_customer_issue_ratio(
+            issues,
+            customer_names,
+            ["中标未签约", "未签约客户"],
+        )
+        activity_risk = _parse_customer_issue_ratio(
+            issues,
+            customer_names,
+            ["流失客户", "僵尸客户", "优质僵尸客户"],
+        )
 
-        # ④ 中标转化率（签约额/中标额，基于模型1.3）
-        bid_amt = group.get("中标额（元）", pd.Series(index=group.index, dtype=float)).apply(safe_float).sum()
-        bid_conversion = total_contract / bid_amt if bid_amt > 0 else 0.0
-        bid_conversion = min(bid_conversion, 1.0)
-
-        # ⑤ 新客户质量指数（国企/政府类新客户占比，基于模型3.2）
-        new_cust_quality = 0.5  # default
-        if "_customer_type" in group.columns:
-            gov_soe = group["_customer_type"].astype(str).str.contains("政府|国企|国资|央企", na=False)
-            new_cust_quality = gov_soe.sum() / max(len(group), 1)
-
-        # ⑥ 战略客户产出比
-        quality_mask = group["_is_quality_customer"] if "_is_quality_customer" in group.columns else pd.Series(index=group.index, dtype=bool)
-        quality_amt = group.loc[quality_mask, "_contract_amt"].sum() if len(group) else 0.0
-        quality_share = quality_amt / total_contract if total_contract > 0 else 0.0
-
-        # 客户风险占比（模型3.1+3.2的客户问题项目占比）
-        customer_issue_projects = {code for code in project_codes
-                                   if issue_index.get(code, {}).get("models", set()) & {"3.1", "3.2"}}
-        customer_risk_ratio = len(customer_issue_projects) / max(len(project_codes), 1)
-
-        score = (stability_index * self.W2["客户稳定性指数"] + (1 - volatility) * self.W2["客户产出波动率_逆向"]
-                 + (1 - min(top5_share, 1.0)) * self.W2["客户集中度风险_逆向"] + bid_conversion * self.W2["中标转化率"]
-                 + new_cust_quality * self.W2["新客户质量指数"] + quality_share * self.W2["战略客户产出比"]
-                 + (1 - customer_risk_ratio) * self.W2["客户风险占比_逆向"])
+        strategic_score = self._compute_strategic_customer_score(group)
+        quality_score = self._compute_quality_customer_score(group)
 
         return ModuleScore(
             score=max(0.0, min(1.0, score)),
             metrics={
-                "customer_stability_index": stability_index,
-                "customer_volatility": volatility,
-                "top5_customer_share": top5_share,
-                "bid_conversion_rate": bid_conversion,
-                "new_customer_quality": new_cust_quality,
-                "quality_customer_share": quality_share,
-                "customer_risk_ratio": customer_risk_ratio,
+                "model_driven_score": score,
                 "customer_count": customer_count,
+                "客户集中度综合": self._compute_customer_concentration_score(group),
+                "战略客户管理": strategic_score,
+                "优质客户占比": quality_score,
+                "中标转化异常": _reverse_risk_score(conversion_risk),
+                "客户活跃度异常": _reverse_risk_score(activity_risk),
+                "新客户结构质量": self._compute_new_customer_quality_score(group),
             },
         )
 
@@ -866,97 +1078,53 @@ class BusinessHealthAnalyzer:
 
     def _module_3_contract(self, group, project_codes, issue_index, total_contract):
         """模块三：合同质量与风险集中度 — 5个指标."""
-        # ① 风险项目占比（模型2.1+2.4标记的项目）
-        risk_models = {"2.1", "2.4"}
-        risk_projects = {code for code in project_codes
-                        if issue_index.get(code, {}).get("models", set()) & risk_models}
-        risk_project_ratio = len(risk_projects) / max(len(project_codes), 1)
+        total_projects = len(group)
+        issues = self._gather_module_issues(["2.1", "2.4"])
 
-        # ② 风险合同额集中度
-        risk_amt = group[group["_project_code"].isin(risk_projects)]["_contract_amt"].sum()
-        risk_contract_ratio = risk_amt / total_contract if total_contract > 0 else 0.0
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
 
-        # ③ 付款条件优良率（未被模型2.1标记为付款条件问题的项目占比）
-        m21_issues = {code for code in project_codes
-                      if issue_index.get(code, {}).get("models", set()) & {"2.1"}}
-        payment_compliance = 1.0 - len(m21_issues) / max(len(project_codes), 1)
+        score = self._score_from_issues(issues, total_projects, total_contract)
+        redline = self._compute_redline_ratios(3, issues, total_projects, total_contract)
 
-        # ④ 合同条款不利度（模型2.4标记的项目占比）
-        m24_issues = {code for code in project_codes
-                      if issue_index.get(code, {}).get("models", set()) & {"2.4"}}
-        clause_risk_ratio = len(m24_issues) / max(len(project_codes), 1)
+        metrics = {
+            "model_driven_score": score,
+            "限制投标风险": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["限制投标"])),
+            "付款条件校验": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["付款条件", "付款条件标记校验不一致"])),
+            "无限责任条款": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["无限责任", "无上限"])),
+            "放弃优先受偿条款": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["放弃优先受偿"])),
+            "停缓建不利": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["停缓建"])),
+            "三证不全": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["三证不全"])),
+            "质保金偏高": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["质保金"])),
+        }
+        metrics.update(redline)
 
-        # ⑤ 三证合规率（从模型2.4输出提取）
-        m24 = self._get_model_df("2.4")
-        permit_ok = 1.0
-        if len(m24) > 0 and "问题分类" in m24.columns:
-            proj_m24 = self._filter_model_df_by_project_codes(m24, project_codes)
-            cats = proj_m24["问题分类"].astype(str)
-            permit_issues = cats[cats.str.contains("三证|许可证", na=False)]
-            permit_ok = 1.0 - len(permit_issues) / max(len(project_codes), 1)
-
-        score = ((1 - min(risk_project_ratio, 1.0)) * self.W3["风险项目占比_逆向"]
-                 + (1 - min(risk_contract_ratio, 1.0)) * self.W3["风险合同额集中度_逆向"]
-                 + payment_compliance * self.W3["付款条件优良率"]
-                 + (1 - min(clause_risk_ratio, 1.0)) * self.W3["合同条款不利度_逆向"]
-                 + permit_ok * self.W3["三证合规率"])
-
-        return ModuleScore(
-            score=max(0.0, min(1.0, score)),
-            metrics={
-                "risk_project_ratio": risk_project_ratio,
-                "risk_contract_ratio": risk_contract_ratio,
-                "payment_compliance_rate": payment_compliance,
-                "clause_risk_ratio": clause_risk_ratio,
-                "permit_compliance_rate": permit_ok,
-            },
-        )
+        return ModuleScore(score=max(0.0, min(1.0, score)), metrics=metrics)
 
     # ═══════════════════════════════════════════════════════════
     # 模块四：履约盈利健康度（基于模型2.2 + 2.5 + 前置过滤）
     # ═══════════════════════════════════════════════════════════
 
     def _module_4_performance(self, group, project_codes, issue_index, total_contract):
-        """模块四：履约盈利健康度 — 4个指标.
+        """模块四：履约盈利健康度 — v4.0: 模型2.2+2.5 驱动."""
+        total_projects = len(group)
+        issues = self._gather_module_issues(["2.2", "2.5"])
 
-        v2.10 数据容错防线：聚合层避免不合理的绝对化操作。
-        v3.x: 已剥离 产值转化率、签约履约偏差率（无可靠数据源支撑），权重转移至其余4项。
-        """
-        # ① 盈利健康度（A值≥底线项目占比）
-        profit_mask = group["_a_value"] > 0
-        healthy_profit_ratio = profit_mask.sum() / max(len(group), 1)
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
 
-        # ② 停工退场率（模型2.5标记的项目占比）
-        m25_issues = {code for code in project_codes
-                      if issue_index.get(code, {}).get("models", set()) & {"2.5"}}
-        stopped_ratio = len(m25_issues) / max(len(project_codes), 1)
+        score = self._score_from_issues(issues, total_projects, total_contract)
+        redline = self._compute_redline_ratios(4, issues, total_projects, total_contract)
 
-        # ③ 效益偏差率（A值与实际利润率偏差>1%的项目占比，从模型2.2提取）
-        m22 = self._get_model_df("2.2")
-        profit_dev = 0.0
-        if len(m22) > 0 and "问题分类" in m22.columns:
-            proj_m22 = self._filter_model_df_by_project_codes(m22, project_codes)
-            dev_cats = proj_m22["问题分类"].astype(str)
-            profit_dev = dev_cats.str.contains("偏差|差异", na=False).sum() / max(len(project_codes), 1)
+        metrics = {
+            "model_driven_score": score,
+            "A值底部亏损": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["承接即亏损"])),
+            "效益偏差": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["效益偏差"])),
+            "签约履约偏差": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["签约履约偏差", "签约"])),
+        }
+        metrics.update(redline)
 
-        # ④ 在施项目活跃度（产值>0且收款>0的项目占比）
-        active_mask = (group["_actual_output"] > 0) & (group["_collection_amt"] > 0)
-        active_ratio = active_mask.sum() / max(len(group), 1)
-
-        score = (min(healthy_profit_ratio, 1.0) * self.W4["盈利健康度"]
-                 + (1 - min(stopped_ratio, 1.0)) * self.W4["停工退场率_逆向"]
-                 + (1 - min(profit_dev, 1.0)) * self.W4["效益偏差率_逆向"]
-                 + min(active_ratio, 1.0) * self.W4["在施项目活跃度"])
-
-        return ModuleScore(
-            score=max(0.0, min(1.0, score)),
-            metrics={
-                "healthy_profit_ratio": healthy_profit_ratio,
-                "stopped_project_ratio": stopped_ratio,
-                "profit_deviation_ratio": profit_dev,
-                "active_project_ratio": active_ratio,
-            },
-        )
+        return ModuleScore(score=max(0.0, min(1.0, score)), metrics=metrics)
 
     # ═══════════════════════════════════════════════════════════
     # 模块五：资金效率与安全性（基于模型2.3）
@@ -964,136 +1132,56 @@ class BusinessHealthAnalyzer:
 
     def _module_5_capital(self, group, project_codes, issue_index, total_contract):
         """模块五：资金效率与安全性 — 5个指标."""
-        # ① 资金占用率（保证金+预收款应收 / 总合同额，基于模型2.3输出估算）
-        m23 = self._get_model_df("2.3")
-        capital_bound = 0.0
-        if len(m23) > 0:
-            proj_m23 = self._filter_model_df_by_project_codes(m23, project_codes)
-            if "保证金金额" in m23.columns:
-                capital_bound = proj_m23["保证金金额"].apply(safe_float).sum()
-        capital_occupancy = capital_bound / total_contract if total_contract > 0 else 0.0
+        total_projects = len(group)
+        issues = self._gather_module_issues(["2.3"])
 
-        # ② 保证金周转天数（从模型2.3问题描述中提取，简化估算）
-        deposit_days = 0.0
-        if len(m23) > 0 and "问题描述" in m23.columns:
-            proj_m23 = self._filter_model_df_by_project_codes(m23, project_codes)
-            descs = proj_m23["问题描述"].astype(str)
-            import re
-            days_list = []
-            for d in descs:
-                m = re.search(r"(\d+)\s*天", d)
-                if m:
-                    days_list.append(int(m.group(1)))
-            deposit_days = sum(days_list) / max(len(days_list), 1) if days_list else 0.0
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
 
-        # ③ 逾期回收率（逾期>90天占总应收，基于模型2.3）
-        overdue_amt = 0.0
-        m23_projects = {code for code in project_codes
-                       if issue_index.get(code, {}).get("models", set()) & {"2.3"}}
-        overdue_ratio = len(m23_projects) / max(len(project_codes), 1)
+        score = self._score_from_issues(issues, total_projects, total_contract)
+        redline = self._compute_redline_ratios(5, issues, total_projects, total_contract)
 
-        # ④ 预收款缺口率（基于模型2.3）
-        advance_gap = 0.0
-        if len(m23) > 0 and "问题分类" in m23.columns:
-            proj_m23 = self._filter_model_df_by_project_codes(m23, project_codes)
-            advance_cats = proj_m23["问题分类"].astype(str)
-            advance_gap = advance_cats.str.contains("预收款", na=False).sum() / max(len(project_codes), 1)
+        metrics = {
+            "model_driven_score": score,
+            "现金保证金占用": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["现金投标保证金", "现金履约保证金"])),
+            "联合体超额担保": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["联合体超额担保"])),
+        }
+        metrics.update(redline)
 
-        # ⑤ 负流项目占比
-        negative_flow = 0.0
-        if len(m23) > 0 and "问题分类" in m23.columns:
-            proj_m23 = self._filter_model_df_by_project_codes(m23, project_codes)
-            flow_cats = proj_m23["问题分类"].astype(str)
-            negative_flow = flow_cats.str.contains("负流|资金负", na=False).sum() / max(len(project_codes), 1)
-
-        # 资金回收率（收款/签约额）
-        collection_rate = group["_collection_amt"].sum() / total_contract_abs if (total_contract_abs := group["_contract_amt"].abs().sum()) > 0 else 0.0
-
-        score = ((1 - min(capital_occupancy, 1.0)) * self.W5["资金占用率_逆向"]
-                 + (1 - min(deposit_days / 365, 1.0)) * self.W5["保证金周转天数_逆向"]
-                 + (1 - min(overdue_ratio, 1.0)) * self.W5["逾期回收率_逆向"]
-                 + (1 - min(advance_gap, 1.0)) * self.W5["预收款缺口率_逆向"]
-                 + (1 - min(negative_flow, 1.0)) * self.W5["负流项目占比_逆向"]
-                 + min(collection_rate, 1.0) * self.W5["资金回收率"])
-
-        return ModuleScore(
-            score=max(0.0, min(1.0, score)),
-            metrics={
-                "capital_occupancy_rate": capital_occupancy,
-                "deposit_turnover_days": deposit_days,
-                "overdue_recovery_rate": overdue_ratio,
-                "advance_shortfall_rate": advance_gap,
-                "negative_flow_ratio": negative_flow,
-                "collection_rate": collection_rate,
-            },
-        )
+        return ModuleScore(score=max(0.0, min(1.0, score)), metrics=metrics)
 
     # ═══════════════════════════════════════════════════════════
     # 模块六：数据质量与流程效率（基于模型1.4）—— v2.10 新增
     # ═══════════════════════════════════════════════════════════
 
     def _module_6_data_quality(self, group, project_codes, issue_index, total_projects):
-        """模块六：数据质量与流程效率分析 — 5个指标（v2.10新增）.
-
-        数据来源：模型1.4（营销统计数据多维交叉验真）输出 + DMP字段完整性.
-        """
-        m14 = self._get_model_df("1.4")
+        """模块六：数据质量与流程效率 — v4.0: 模型1.4 驱动."""
         total = max(total_projects, 1)
+        issues = self._gather_module_issues(["1.4"])
 
-        # ① 数据完整率：关键字段非空率
-        completeness = 0.0
-        field_count = 0
-        for col in self.KEY_FIELDS:
-            if col in group.columns:
-                completeness += group[col].notna().mean()
-                field_count += 1
-        completeness = completeness / max(field_count, 1)
+        if not issues.empty and "项目编码" in issues.columns:
+            issues = issues[issues["项目编码"].astype(str).isin(set(project_codes))]
 
-        # ② 流程合规率（招文评审→交标→中标→签约时序合规占比）
-        process_issues = 0
-        if len(m14) > 0:
-            proj_m14 = self._filter_model_df_by_project_codes(m14, project_codes)
-            if "问题分类" in m14.columns:
-                cats = proj_m14["问题分类"].astype(str)
-                process_issues = cats.str.contains("流程|时序|合规|顺序", na=False).sum()
-        process_compliance = 1.0 - process_issues / total
+        score = self._score_from_issues(issues, total, 0)
+        redline = self._compute_redline_ratios(6, issues, total, 0)
 
-        # ③ 中标签约偏差率（|中标额-签约额|>5%项目占比）
-        bid_dev = 0.0
-        if len(m14) > 0 and "问题分类" in m14.columns:
-            proj_m14 = self._filter_model_df_by_project_codes(m14, project_codes)
-            cats = proj_m14["问题分类"].astype(str)
-            bid_dev = cats.str.contains("偏差|中标.*签约|签约.*中标|金额差异", na=False).sum() / total
-
-        # ④ 测算规律性指数（基于A值标准差归一化）
-        a_std = group["_a_value"].std()
-        estimation_regularity = max(0.0, min(1.0, 1.0 - a_std / 0.05)) if pd.notna(a_std) else 0.5
-
-        # ⑤ 签约延迟率（预计签约日已过但未签约的项目占比）
-        sign_delay = 0.0
-        if len(m14) > 0 and "问题分类" in m14.columns:
-            proj_m14 = self._filter_model_df_by_project_codes(m14, project_codes)
-            cats = proj_m14["问题分类"].astype(str)
-            sign_delay = cats.str.contains("延迟|未签约|超期|逾期.*签约", na=False).sum() / total
-
-        score = (completeness * self.W6["数据完整率"] + process_compliance * self.W6["流程合规率"]
-                 + (1 - bid_dev) * self.W6["中标签约偏差率_逆向"] + estimation_regularity * self.W6["测算规律性指数"]
-                 + (1 - sign_delay) * self.W6["签约延迟率_逆向"])
-
-        return ModuleScore(
-            score=max(0.0, min(1.0, score)),
-            metrics={
-                "data_completeness": completeness,
-                "process_compliance": process_compliance,
-                "bid_sign_deviation": bid_dev,
-                "estimation_regularity": estimation_regularity,
-                "sign_delay_ratio": sign_delay,
-            },
+        process_issue_ratio = _parse_issue_ratio(
+            issues,
+            set(project_codes),
+            ["时间倒置", "招文领取与交标时间倒置", "交标与中标时间倒置", "中标与签约时间倒置", "签约与签约报量时间倒置"],
         )
+        metrics = {
+            "model_driven_score": score,
+            "流程时间倒置": _reverse_risk_score(process_issue_ratio),
+            "利润率规律异常": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["利润率规律性异常"])),
+            "中标签约金额偏离": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["中标签约金额偏离"])),
+            "签约逾期": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["预计签约逾期", "中标后长期未签约"])),
+            "凑量嫌疑": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["凑量嫌疑"])),
+            "邀请招标比例过高": _reverse_risk_score(_parse_issue_ratio(issues, set(project_codes), ["邀请招标比例过高"])),
+        }
+        metrics.update(redline)
 
-    # ═══════════════════════════════════════════════════════════
-    # 全局概览
-    # ═══════════════════════════════════════════════════════════
+        return ModuleScore(score=max(0.0, min(1.0, score)), metrics=metrics)
 
     def _build_overview(self, df: pd.DataFrame, issue_index: dict) -> dict:
         total_contract = df["_contract_amt"].sum()
@@ -1127,31 +1215,31 @@ class BusinessHealthAnalyzer:
                 "模块五_资金效率": round(m5.score * 100, 1),
                 "模块六_数据质量": round(m6.score * 100, 1),
             },
-            # 模块一指标
-            "区域渗透率": {"value": round(m1.metrics["region_penetration_rate"] * 100, 1),
-                       "formula": "落地城市数 ÷ 授权深耕+重点城市数"},
-            "跨区域经营指数": {"value": round(m1.metrics["cross_region_contract_ratio"] * 100, 1),
-                          "formula": "非常规区域合同额 ÷ 总合同额"},
-            # 模块二指标
-            "战略客户产出比": {"value": round(m2.metrics["quality_customer_share"] * 100, 1),
-                          "formula": "战略+优质客户合同额 ÷ 总合同额"},
-            "客户集中度风险": {"value": round(m2.metrics["top5_customer_share"] * 100, 1),
-                          "formula": "前5大客户合同额占比"},
-            # 模块三指标
-            "风险项目占比": {"value": round(m3.metrics["risk_project_ratio"] * 100, 1),
-                        "formula": "触碰红线/限制投标项目数 ÷ 总项目数"},
-            # 模块四指标
-            "盈利健康度": {"value": round(m4.metrics["healthy_profit_ratio"] * 100, 1),
-                       "formula": "A值≥底线项目占比"},
-            # 模块五指标
-            "资金回收率": {"value": round(m5.metrics.get("collection_rate", 0) * 100, 1),
-                       "formula": "累计收款 ÷ 签约额"},
-            # 模块六指标
-            "数据完整率": {"value": round(m6.metrics["data_completeness"] * 100, 1),
-                       "formula": "关键字段非空率（DMP 78字段）"},
+            # v4.0 模块驱动评分（安全读取）
+            "模型驱动评分": {
+                "模块一": round(m1.metrics.get("model_driven_score", m1.score) * 100, 1),
+                "模块二": round(m2.metrics.get("model_driven_score", m2.score) * 100, 1),
+                "模块三": round(m3.metrics.get("model_driven_score", m3.score) * 100, 1),
+                "模块四": round(m4.metrics.get("model_driven_score", m4.score) * 100, 1),
+                "模块五": round(m5.metrics.get("model_driven_score", m5.score) * 100, 1),
+                "模块六": round(m6.metrics.get("model_driven_score", m6.score) * 100, 1),
+            },
+            # 模块一：独立/半独立展示指标
+            "跨区域经营合规": round(m1.metrics.get("跨区域经营合规", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "区域覆盖质量": round(m1.metrics.get("model_driven_score", 0) * 100, 1),
+            "业务结构偏离": round(m1.metrics.get("业务结构偏离", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "EPC转型进度": round(m1.metrics.get("EPC转型进度", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "战略新兴业务缺口": round(m1.metrics.get("战略新兴业务缺口", m1.metrics.get("model_driven_score", 0) * 100), 1),
+            "区域发展偏离": round(m1.metrics.get("model_driven_score", 0) * 100, 1),
+            # 模块二：独立/源模型拆分指标
+            "客户集中度综合": round(m2.metrics.get("客户集中度综合", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "战略客户管理": round(m2.metrics.get("战略客户管理", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "优质客户占比": round(m2.metrics.get("优质客户占比", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "中标转化异常": round(m2.metrics.get("中标转化异常", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "客户活跃度异常": round(m2.metrics.get("客户活跃度异常", m2.metrics.get("model_driven_score", 0) * 100), 1),
+            "新客户结构质量": round(m2.metrics.get("新客户结构质量", m2.metrics.get("model_driven_score", 0) * 100), 1),
             # 综合
             "score_band": self._score_band_counts(df, issue_index),
-            # v2.10: 当前使用的155规划基准名称
             "strategic_scope_name": (self._strategic_scope or {}).get("scope_name", "四局全局155基准"),
         }
 
@@ -1370,6 +1458,298 @@ class BusinessHealthAnalyzer:
         return group[group["_project_code"].isin(selected)]["_contract_amt"].sum()
 
 
+def _metric_catalog_for_module(module_id: int) -> list[dict]:
+    return copy.deepcopy(DISPLAY_METRIC_CATALOG.get(module_id, []))
+
+
+def _normalize_ratio(value) -> float:
+    try:
+        if value in (None, ""):
+            return 0.0
+        return max(0.0, min(float(value), 1.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _safe_percent_score(actual_ratio: float, target_ratio: float) -> float:
+    actual = _normalize_ratio(actual_ratio)
+    target = max(float(target_ratio or 0), 0.0001)
+    return round(min(actual / target, 1.0) * 100, 1)
+
+
+def _reverse_risk_score(risk_ratio: float) -> float:
+    return round((1.0 - _normalize_ratio(risk_ratio)) * 100, 1)
+
+
+METRIC_CARD_OVERRIDES = {
+    "限制投标风险": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "付款条件校验": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "无限责任条款": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "放弃优先受偿条款": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "停缓建不利": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "三证不全": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "质保金偏高": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "A值底部亏损": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "效益偏差": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "签约履约偏差": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "现金保证金占用": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "联合体超额担保": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "中标签约金额偏离": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "签约逾期": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "凑量嫌疑": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    "邀请招标比例过高": {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+}
+
+
+MODULE_CARD_INDEX_OVERRIDES = {
+    3: {i: {"metric_type": "risk_rate", "score_mode": "issue_rate"} for i in range(8)},
+    4: {i: {"metric_type": "risk_rate", "score_mode": "issue_rate"} for i in range(4)},
+    5: {i: {"metric_type": "risk_rate", "score_mode": "issue_rate"} for i in range(4)},
+    6: {
+        0: {"metric_type": "independent_score", "score_mode": "issue_rate"},
+        1: {"metric_type": "independent_score", "score_mode": "issue_rate"},
+        2: {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+        3: {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+        4: {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+        5: {"metric_type": "risk_rate", "score_mode": "issue_rate"},
+    },
+}
+
+MODULE_CARD_DEFINITIONS = {
+    3: [
+        {"name": "严禁投标红线集", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：红线项目占比", "score_formula": "正向得分 = (1 - 红线项目占比) × 100"},
+        {"name": "限制投标风险", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：限制投标规则合并", "score_formula": "正向得分 = (1 - 限制投标异常率) × 100"},
+        {"name": "付款条件校验", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：付款条件规则校验", "score_formula": "正向得分 = (1 - 付款条件异常率) × 100"},
+        {"name": "无限责任条款", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：无限责任条款穿透", "score_formula": "正向得分 = (1 - 无限责任条款异常率) × 100"},
+        {"name": "放弃优先受偿权", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1 + 2.4：同概念条款合并", "score_formula": "正向得分 = (1 - 放弃优先受偿权异常率) × 100"},
+        {"name": "停缓建不利", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：停缓建不利条款", "score_formula": "正向得分 = (1 - 停缓建不利异常率) × 100"},
+        {"name": "三证不全", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：三证不全即开工", "score_formula": "正向得分 = (1 - 三证不全异常率) × 100"},
+        {"name": "质保金偏高", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：质保金比例 > 5%", "score_formula": "正向得分 = (1 - 质保金偏高异常率) × 100"},
+    ],
+    4: [
+        {"name": "A值底部亏损", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：A值底线检测", "score_formula": "正向得分 = (1 - A值底部亏损异常率) × 100"},
+        {"name": "效益偏差", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：备案A值 vs 实际利润率偏差", "score_formula": "正向得分 = (1 - 效益偏差异常率) × 100"},
+        {"name": "施工真实性异常", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：停工/退场/停缓建异常占比", "score_formula": "正向得分 = (1 - 停工退场率) × 100"},
+        {"name": "签约履约偏差", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：签约 > 12个月产值转化率 < 10%", "score_formula": "正向得分 = (1 - 签约履约偏差异常率) × 100"},
+    ],
+    5: [
+        {"name": "现金保证金占用", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：投标保证金 + 履约保证金合并", "score_formula": "正向得分 = (1 - 现金保证金占用异常率) × 100"},
+        {"name": "资金逾期回收", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：保证金逾期 + 预收款逾期占比", "score_formula": "正向得分 = (1 - 逾期回收率) × 100"},
+        {"name": "联合体超额担保", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：联合体项目履约担保 > 合同额10%", "score_formula": "正向得分 = (1 - 联合体超额担保异常率) × 100"},
+        {"name": "资金负流", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：负流项目占比", "score_formula": "正向得分 = (1 - 负流项目占比) × 100"},
+    ],
+    6: [
+        {"name": "流程时间倒置", "metric_type": "independent_score", "score_mode": "issue_rate", "formula": "模型1.4：流程合规率", "score_formula": "正向得分 = 流程合规率 × 100"},
+        {"name": "利润率规律异常", "metric_type": "independent_score", "score_mode": "issue_rate", "formula": "模型1.4：测算规律性指数", "score_formula": "正向得分 = 测算规律性指数 × 100"},
+        {"name": "中标签约金额偏离", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：中标签约金额偏离", "score_formula": "正向得分 = (1 - 中标签约金额偏离异常率) × 100"},
+        {"name": "签约逾期", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：签约逾期规则", "score_formula": "正向得分 = (1 - 签约逾期异常率) × 100"},
+        {"name": "凑量嫌疑", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：短期集中签约", "score_formula": "正向得分 = (1 - 凑量嫌疑异常率) × 100"},
+        {"name": "邀请招标比例过高", "metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：邀请招标项目数 / 总数 > 70%", "score_formula": "正向得分 = (1 - 邀请招标比例过高异常率) × 100"},
+    ],
+}
+
+
+def _build_metric_cards(module_id: int, overview: dict, module_score: float) -> list[dict]:
+    metric_values_map = {
+        1: {
+            "跨区域经营合规": overview.get("跨区域经营合规", module_score),
+            "区域覆盖质量": overview.get("区域覆盖质量", module_score),
+            "业务结构偏离": overview.get("业务结构偏离", module_score),
+            "EPC转型进度": overview.get("EPC转型进度", module_score),
+            "战略新兴业务缺口": overview.get("战略新兴业务缺口", module_score),
+            "区域发展偏离": overview.get("区域发展偏离", module_score),
+        },
+        2: {
+            "客户集中度综合": overview.get("客户集中度综合", module_score),
+            "战略客户管理": overview.get("战略客户管理", module_score),
+            "优质客户占比": overview.get("优质客户占比", module_score),
+            "中标转化异常": overview.get("中标转化异常", module_score),
+            "客户活跃度异常": overview.get("客户活跃度异常", module_score),
+            "新客户结构质量": overview.get("新客户结构质量", module_score),
+        },
+        3: {
+            "严禁投标红线集": overview.get("严禁投标红线集", 0),
+            "限制投标风险": overview.get("限制投标风险", module_score),
+            "付款条件校验": overview.get("付款条件校验", module_score),
+            "无限责任条款": overview.get("无限责任条款", module_score),
+            "放弃优先受偿权": overview.get("放弃优先受偿权", module_score),
+            "停缓建不利": overview.get("停缓建不利", module_score),
+            "三证不全": overview.get("三证不全", module_score),
+            "质保金偏高": overview.get("质保金偏高", module_score),
+        },
+        4: {
+            "A值底部亏损": overview.get("A值底部亏损", module_score),
+            "效益偏差": overview.get("效益偏差", module_score),
+            "施工真实性异常": overview.get("施工真实性异常", 0),
+            "签约履约偏差": overview.get("签约履约偏差", module_score),
+        },
+        5: {
+            "现金保证金占用": overview.get("现金保证金占用", module_score),
+            "资金逾期回收": overview.get("资金逾期回收", 0),
+            "联合体超额担保": overview.get("联合体超额担保", module_score),
+            "资金负流": overview.get("资金负流", 0),
+        },
+        6: {
+            "流程时间倒置": overview.get("流程时间倒置", module_score),
+            "利润率规律异常": overview.get("利润率规律异常", module_score),
+            "中标签约金额偏离": overview.get("中标签约金额偏离", module_score),
+            "签约逾期": overview.get("签约逾期", module_score),
+            "凑量嫌疑": overview.get("凑量嫌疑", module_score),
+            "邀请招标比例过高": overview.get("邀请招标比例过高", module_score),
+        },
+    }
+
+    cards = []
+    values = metric_values_map.get(module_id, {})
+    source_items = MODULE_CARD_DEFINITIONS.get(module_id, _metric_catalog_for_module(module_id))
+    for index, item in enumerate(source_items):
+        override = {}
+        override.update(METRIC_CARD_OVERRIDES.get(item["name"], {}))
+        override.update(MODULE_CARD_INDEX_OVERRIDES.get(module_id, {}).get(index, {}))
+        base_type = item.get("metric_type", item.get("type", "module_proxy"))
+        base_mode = item.get("score_mode", base_type)
+        metric_type = override.get("metric_type", base_type)
+        score_mode = override.get("score_mode", base_mode)
+        raw_score = values.get(item["name"], None)
+        if raw_score in (None, ""):
+            score_value = 0.0 if metric_type == "risk_rate" else float(module_score or 0.0)
+        else:
+            score_value = float(raw_score or 0.0)
+        card = {
+            "name": item["name"],
+            "metric_type": metric_type,
+            "score_mode": score_mode,
+            "formula": item["formula"],
+            "score_formula": item["score_formula"],
+            "module_score": round(module_score, 1),
+            "display_score": round(score_value, 1),
+        }
+        if metric_type == "risk_rate":
+            anomaly_rate = _normalize_ratio(score_value / 100.0)
+            positive_score = round((1.0 - anomaly_rate) * 100, 1)
+            card["anomaly_rate"] = round(anomaly_rate * 100, 1)
+            card["display_score"] = positive_score
+            card["raw_display_value"] = round(score_value, 1)
+        cards.append(card)
+    return cards
+
+
+def _collect_metric_value_from_rows(rows, key: str) -> float:
+    values = []
+    for row in rows or []:
+        try:
+            value = row.get(key, None)
+        except AttributeError:
+            value = None
+        if value in (None, ""):
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        values.append(numeric)
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 1)
+
+
+def _parse_issue_ratio(issue_df: pd.DataFrame, project_codes: set, patterns: list[str]) -> float:
+    if issue_df is None or issue_df.empty or "问题分类" not in issue_df.columns:
+        return 0.0
+    scoped = issue_df.copy()
+    if "项目编码" in scoped.columns and project_codes:
+        scoped = scoped[scoped["项目编码"].astype(str).isin(project_codes)]
+    regex = "|".join(patterns)
+    hit_count = int(scoped["问题分类"].astype(str).str.contains(regex, na=False, regex=True).sum())
+    return _normalize_ratio(hit_count / max(len(project_codes), 1))
+
+
+def _parse_customer_issue_ratio(issue_df: pd.DataFrame, customer_names: set[str], patterns: list[str]) -> float:
+    if issue_df is None or issue_df.empty or "问题分类" not in issue_df.columns:
+        return 0.0
+    scoped = issue_df.copy()
+    if "客户名称" in scoped.columns and customer_names:
+        scoped = scoped[scoped["客户名称"].astype(str).isin(customer_names)]
+    regex = "|".join(patterns)
+    hit_count = int(scoped["问题分类"].astype(str).str.contains(regex, na=False, regex=True).sum())
+    return _normalize_ratio(hit_count / max(len(customer_names), 1))
+
+
+FINAL_CARD_FIXUPS = {
+    3: {
+        "限制投标风险": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：限制投标规则合并", "score_formula": "正向得分 = (1 - 限制投标异常率) × 100"},
+        "付款条件校验": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：付款条件规则校验", "score_formula": "正向得分 = (1 - 付款条件异常率) × 100"},
+        "无限责任条款": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：无限责任条款穿透", "score_formula": "正向得分 = (1 - 无限责任条款异常率) × 100"},
+        "放弃优先受偿权": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1 + 2.4：同概念条款合并", "score_formula": "正向得分 = (1 - 放弃优先受偿权异常率) × 100"},
+        "停缓建不利": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：停缓建不利条款", "score_formula": "正向得分 = (1 - 停缓建不利异常率) × 100"},
+        "三证不全": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：三证不全即开工", "score_formula": "正向得分 = (1 - 三证不全异常率) × 100"},
+        "质保金偏高": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：质保金比例 > 5%", "score_formula": "正向得分 = (1 - 质保金偏高异常率) × 100"},
+    },
+    4: {
+        "A值底部亏损": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：A值底线检测", "score_formula": "正向得分 = (1 - A值底部亏损异常率) × 100"},
+        "效益偏差": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：备案A值 vs 实际利润率偏差", "score_formula": "正向得分 = (1 - 效益偏差异常率) × 100"},
+        "签约履约偏差": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：签约 > 12个月产值转化率 < 10%", "score_formula": "正向得分 = (1 - 签约履约偏差异常率) × 100"},
+    },
+    5: {
+        "现金保证金占用": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：投标保证金 + 履约保证金合并", "score_formula": "正向得分 = (1 - 现金保证金占用异常率) × 100"},
+        "联合体超额担保": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：联合体项目履约担保 > 合同额10%", "score_formula": "正向得分 = (1 - 联合体超额担保异常率) × 100"},
+    },
+    6: {
+        "中标签约金额偏离": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：中标签约金额偏离", "score_formula": "正向得分 = (1 - 中标签约金额偏离异常率) × 100"},
+        "签约逾期": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：签约逾期规则", "score_formula": "正向得分 = (1 - 签约逾期异常率) × 100"},
+        "凑量嫌疑": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：短期集中签约", "score_formula": "正向得分 = (1 - 凑量嫌疑异常率) × 100"},
+        "邀请招标比例过高": {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：邀请招标项目数 / 总数 > 70%", "score_formula": "正向得分 = (1 - 邀请招标比例过高异常率) × 100"},
+    },
+}
+
+
+def _finalize_metric_cards(module_id: int, cards: list[dict]) -> list[dict]:
+    fixups = FINAL_CARD_FIXUPS.get(module_id, {})
+    index_fixups = {
+        3: {
+            1: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：限制投标规则合并", "score_formula": "正向得分 = (1 - 限制投标异常率) × 100"},
+            2: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1：付款条件规则校验", "score_formula": "正向得分 = (1 - 付款条件异常率) × 100"},
+            3: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：无限责任条款穿透", "score_formula": "正向得分 = (1 - 无限责任条款异常率) × 100"},
+            4: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.1 + 2.4：同概念条款合并", "score_formula": "正向得分 = (1 - 放弃优先受偿权异常率) × 100"},
+            5: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：停缓建不利条款", "score_formula": "正向得分 = (1 - 停缓建不利异常率) × 100"},
+            6: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：三证不全即开工", "score_formula": "正向得分 = (1 - 三证不全异常率) × 100"},
+            7: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.4：质保金比例 > 5%", "score_formula": "正向得分 = (1 - 质保金偏高异常率) × 100"},
+        },
+        4: {
+            0: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：A值底线检测", "score_formula": "正向得分 = (1 - A值底部亏损异常率) × 100"},
+            1: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.2：备案A值 vs 实际利润率偏差", "score_formula": "正向得分 = (1 - 效益偏差异常率) × 100"},
+            3: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.5：签约 > 12个月产值转化率 < 10%", "score_formula": "正向得分 = (1 - 签约履约偏差异常率) × 100"},
+        },
+        5: {
+            0: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：投标保证金 + 履约保证金合并", "score_formula": "正向得分 = (1 - 现金保证金占用异常率) × 100"},
+            2: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型2.3：联合体项目履约担保 > 合同额10%", "score_formula": "正向得分 = (1 - 联合体超额担保异常率) × 100"},
+        },
+        6: {
+            2: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：中标签约金额偏离", "score_formula": "正向得分 = (1 - 中标签约金额偏离异常率) × 100"},
+            3: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：签约逾期规则", "score_formula": "正向得分 = (1 - 签约逾期异常率) × 100"},
+            4: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：短期集中签约", "score_formula": "正向得分 = (1 - 凑量嫌疑异常率) × 100"},
+            5: {"metric_type": "risk_rate", "score_mode": "issue_rate", "formula": "模型1.4：邀请招标项目数 / 总数 > 70%", "score_formula": "正向得分 = (1 - 邀请招标比例过高异常率) × 100"},
+        },
+    }.get(module_id, {})
+    if not fixups and not index_fixups:
+        return cards
+    finalized = []
+    for idx, card in enumerate(cards):
+        fix = fixups.get(card.get("name")) or index_fixups.get(idx)
+        if not fix:
+            finalized.append(card)
+            continue
+        merged = dict(card)
+        merged.update(fix)
+        score_value = float(merged.get("raw_display_value", merged.get("display_score", 0)) or 0.0)
+        anomaly_rate = _normalize_ratio(score_value / 100.0)
+        merged["anomaly_rate"] = round(anomaly_rate * 100, 1)
+        merged["raw_display_value"] = round(score_value, 1)
+        merged["display_score"] = round((1.0 - anomaly_rate) * 100, 1)
+        finalized.append(merged)
+    return finalized
+
+
 def _business_module_detail_stable(business_result: dict, module_id: int) -> dict:
     if not business_result or not isinstance(business_result, dict):
         return _empty_module(module_id)
@@ -1438,6 +1818,13 @@ def _business_module_detail_stable(business_result: dict, module_id: int) -> dic
         values = [value for value in values if value != 0]
         return round(sum(values) / len(values), 1) if values else 0.0
 
+    card_value_map = {}
+    for module_metrics in DISPLAY_METRIC_CATALOG.values():
+        for item in module_metrics:
+            key = item.get("name")
+            if key:
+                card_value_map[key] = overview_value(key)
+
     module_key = module_names.get(module_id, "")
     score_col = module_score_cols.get(module_id, "")
     score = to_float(module_scores.get(module_key, 0))
@@ -1471,6 +1858,8 @@ def _business_module_detail_stable(business_result: dict, module_id: int) -> dic
         "score": score,
         "scope_name": scope_name,
         "metrics": metrics,
+        "metric_cards": _finalize_metric_cards(module_id, _build_metric_cards(module_id, {**overview, **card_value_map}, score)),
+        "metric_catalog": _metric_catalog_for_module(module_id),
         "metric_values": list(metrics.values()),
         "veto_triggered": any_veto,
         "data_missing": data_missing,
@@ -1512,6 +1901,22 @@ def extract_module_data(business_result: dict, module_id: int) -> dict:
     subsidiaries = business_result.get("subsidiaries", [])
     cities = business_result.get("cities", [])
 
+    subs_rows = subsidiaries.to_dict(orient='records') if hasattr(subsidiaries, 'to_dict') else (subsidiaries or [])
+    city_rows = cities.to_dict(orient='records') if hasattr(cities, 'to_dict') else (cities or [])
+
+    card_value_map = {}
+    for module_metrics in DISPLAY_METRIC_CATALOG.values():
+        for item in module_metrics:
+            key = item.get("name")
+            if not key:
+                continue
+            raw = overview.get(key, None)
+            if isinstance(raw, dict):
+                raw = raw.get("value", 0)
+            if raw in (None, "", 0):
+                raw = _collect_metric_value_from_rows(subs_rows, key) or _collect_metric_value_from_rows(city_rows, key)
+            card_value_map[key] = raw
+
     metric_name_map = {
         1: ["区域渗透率", "跨区域经营指数", "深耕区域集中度", "区域合同额强度", "业务结构偏离度", "EPC转型进度"],
         2: ["客户稳定性指数", "客户产出波动率", "客户集中度风险", "中标转化率", "新客户质量指数", "战略客户产出比"],
@@ -1541,6 +1946,8 @@ def extract_module_data(business_result: dict, module_id: int) -> dict:
         "score": score,
         "metrics": {c: overview.get(c, {}).get("value", 0) if isinstance(overview.get(c), dict) else overview.get(c, 0)
                     for c in metric_cols},
+        "metric_cards": _finalize_metric_cards(module_id, _build_metric_cards(module_id, {**overview, **card_value_map}, float(score or 0))),
+        "metric_catalog": _metric_catalog_for_module(module_id),
         "top_subsidiaries": subs_sorted,
         "top_cities": cities_sorted,
     }
@@ -1561,6 +1968,8 @@ def _empty_module(module_id: int) -> dict:
         "module_name": f"模块{module_id}",
         "score": 0,
         "metrics": {},
+        "metric_cards": [],
+        "metric_catalog": _metric_catalog_for_module(module_id),
         "top_subsidiaries": [],
         "top_cities": [],
     }

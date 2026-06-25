@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 from utils.helpers import safe_float
 from utils.scoring_engine import ScoringEngine, DATA_MISSING, EXEMPT
@@ -169,54 +170,33 @@ class DiscreteAnalyzer:
         else:
             return 3  # 高风险
 
+    def _risk_continuous(self, score_0_100: float) -> float:
+        """v4.0: 连续风险值 (1.0-3.0)，经 ScoringEngine 平滑插值消灭阶梯断崖."""
+        engine = self._get_scoring_engine()
+        return engine.score_to_risk_level(score_0_100)
+
+    def _return_continuous(self, score_0_100: float) -> float:
+        """v4.0: 连续收益值 (1.0-3.0)，经 ScoringEngine 平滑插值消灭阶梯断崖."""
+        engine = self._get_scoring_engine()
+        return engine.score_to_return_level(score_0_100)
+
+    def _calibrate_thresholds(self, all_scores: list = None) -> tuple:
+        """v4.0: 混合阈值标定（数据驱动 P33/P67 + 制度底线 75/60 + 冷启动 80/65）."""
+        if all_scores is None or len(all_scores) < 10:
+            return 80, 65  # 冷启动：首次运行使用绝对标准
+        p33 = np.percentile(all_scores, 33)
+        p67 = np.percentile(all_scores, 67)
+        return max(p67, 75), max(p33, 60)
+
     def _dynamic_risk_tier(self, score_0_100: float, project_year: int = None,
-                           engineering_type: str = None) -> int:
-        """v3.2: 动态阈值路由版 risk tier.
-
-        按项目年份和工程类型读取差异化阈值（80/65 vs 75/60 vs 地产 75/55）。
-        调用方不需传工程类型时自动回落全局默认。
-        """
-        # 选策略：地产 > 新/旧制度
-        is_realestate = engineering_type and "地产" in str(engineering_type)
-        is_new = (project_year or 0) >= self._switch_year
-
-        if is_realestate:
-            strong, steady = self._bands_realestate.get("强势", 75), self._bands_realestate.get("稳健", 55)
-        elif is_new:
-            strong, steady = self._bands_new.get("强势", 80), self._bands_new.get("稳健", 65)
-        else:
-            strong, steady = self._bands_old.get("强势", 75), self._bands_old.get("稳健", 60)
-
-        if score_0_100 >= strong:
-            return 1
-        elif score_0_100 >= steady:
-            return 2
-        return 3
+                           engineering_type: str = None) -> float:
+        """v4.0: 连续风险值 (1.0-3.0)，返回 float 替代旧版 int 1/2/3."""
+        return self._risk_continuous(score_0_100)
 
     def _dynamic_return_tier(self, score_0_100: float, project_year: int = None,
-                             engineering_type: str = None) -> int:
-        """v3.2: 动态阈值路由版 return tier。"""
-        is_realestate = engineering_type and "地产" in str(engineering_type)
-        is_new = (project_year or 0) >= self._switch_year
-
-        if is_realestate:
-            strong, steady = self._bands_realestate.get("强势", 75), self._bands_realestate.get("稳健", 55)
-        elif is_new:
-            strong, steady = self._bands_new.get("强势", 80), self._bands_new.get("稳健", 65)
-        else:
-            strong, steady = self._bands_old.get("强势", 75), self._bands_old.get("稳健", 60)
-
-        if score_0_100 >= strong:
-            return 3
-        elif score_0_100 >= steady:
-            return 2
-        return 1
-        if score_0_100 >= 80:
-            return 3  # 高收益
-        elif score_0_100 >= 65:
-            return 2  # 中收益
-        else:
-            return 1  # 低收益
+                             engineering_type: str = None) -> float:
+        """v4.0: 连续收益值 (1.0-3.0)，返回 float 替代旧版 int 1/2/3."""
+        return self._return_continuous(score_0_100)
 
     @staticmethod
     def score_to_tier_label(score_0_100: float) -> str:
@@ -249,62 +229,36 @@ class DiscreteAnalyzer:
         return False
 
     def _has_contract_veto(self, proj_code, all_results) -> bool:
-        """v3.2: 全量配置驱动 — 遍历 rules.json 所有 is_veto 指标检测一票否决。
+        """v4.0: 全模型扫描 — 遍历全部11个模型的red/严禁投标检出判定一票否决.
 
-        检测维度（三级串联）：
-        1. 模型2.1 严禁投标 / 模型2.4 合同条款不利（合同底线）
-        2. 模型2.5 停工退场（履约红线）
-        3. 模型2.3 资金负流 / 逾期（资金红线）
+        替代旧版硬编码4个模型维度的做法。任一模型对该项目检出red/严禁投标即触发。
         """
         code = str(proj_code)
         if not code:
             return False
 
-        # ── 维度1: 合同底线（严禁投标） ← 模型2.1 ──
-        if "严禁底线触碰次数" in self._veto_indicator_map:
-            r21_df = all_results.get("2.1", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
-            if len(r21_df) > 0 and "项目编码" in r21_df.columns:
-                proj_issues = r21_df[r21_df["项目编码"].astype(str) == code]
-                if len(proj_issues) > 0:
-                    cols = [c for c in ("严重等级", "问题分类", "问题描述") if c in proj_issues.columns]
-                    if cols:
-                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
-                        if text.str.contains("严禁投标|red|红线", na=False).any():
-                            return True
+        RED_MODELS = ["1.1", "1.2", "1.3", "1.4", "2.1", "2.2", "2.3", "2.4", "2.5", "3.1", "3.2"]
 
-        # ── 维度2: 合同条款不利（模型2.4 三证/条款问题）──
-        if "合同条款不利度" in self._veto_indicator_map:
-            r24_df = all_results.get("2.4", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
-            if len(r24_df) > 0 and "项目编码" in r24_df.columns:
-                proj_issues = r24_df[r24_df["项目编码"].astype(str) == code]
-                if len(proj_issues) > 0 and "严重等级" in r24_df.columns:
-                    sevs = proj_issues["严重等级"].astype(str)
-                    if sevs.str.contains("严禁投标|red|红线", na=False).any():
-                        return True
+        for model_id in RED_MODELS:
+            model_data = all_results.get(model_id)
+            if model_data is None:
+                continue
+            issues_df = model_data[0] if isinstance(model_data, tuple) else model_data
+            if not isinstance(issues_df, pd.DataFrame) or len(issues_df) == 0:
+                continue
+            if "项目编码" not in issues_df.columns:
+                continue
 
-        # ── 维度3: 履约红线（停工退场） ← 模型2.5 ──
-        if "停工退场率" in self._veto_indicator_map:
-            r25_df = all_results.get("2.5", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
-            if len(r25_df) > 0 and "项目编码" in r25_df.columns:
-                proj_issues = r25_df[r25_df["项目编码"].astype(str) == code]
-                if len(proj_issues) > 0:
-                    cols = [c for c in ("严重等级", "问题分类") if c in proj_issues.columns]
-                    if cols:
-                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
-                        if text.str.contains("停工|退场|停缓建|red|红线", na=False).any():
-                            return True
+            proj_issues = issues_df[issues_df["项目编码"].astype(str) == code]
+            if len(proj_issues) == 0:
+                continue
 
-        # ── 维度4: 资金红线（逾期/负流） ← 模型2.3 ──
-        if "逾期回收率" in self._veto_indicator_map or "负流项目占比" in self._veto_indicator_map:
-            r23_df = all_results.get("2.3", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
-            if len(r23_df) > 0 and "项目编码" in r23_df.columns:
-                proj_issues = r23_df[r23_df["项目编码"].astype(str) == code]
-                if len(proj_issues) > 0:
-                    cols = [c for c in ("严重等级", "问题分类", "问题描述") if c in proj_issues.columns]
-                    if cols:
-                        text = proj_issues[cols].astype(str).agg(" ".join, axis=1)
-                        if text.str.contains("资金负流|严重逾期|red|红线", na=False).any():
-                            return True
+            # 检查严重等级是否包含red/严禁投标
+            severity_cols = [c for c in ("严重等级", "问题分类") if c in proj_issues.columns]
+            if severity_cols:
+                text = proj_issues[severity_cols].astype(str).agg(" ".join, axis=1)
+                if text.str.contains("严禁投标|red", na=False).any():
+                    return True
 
         return False
 
@@ -409,8 +363,7 @@ class DiscreteAnalyzer:
         r_cut_low = r_cfg.get("分箱阈值", {}).get("低风险上限", 1.6)
         r_cut_high = r_cfg.get("分箱阈值", {}).get("中风险上限", 2.4)
         r_level = 1 if r_score <= r_cut_low else (2 if r_score <= r_cut_high else 3)
-        if max(r_components) == 3 and r_level < 2:
-            r_level = 2
+        # v4.0: 连续值下不再需要 max(r_components) == 3 强制升级逻辑
 
         # ═══════════════════════════════════════════════════════
         # E轴：模块四(履约盈利, 0.55) + 模块五(资金效率, 0.45)
@@ -512,26 +465,40 @@ class DiscreteAnalyzer:
             proj_m21 = m21_df[m21_df["项目编码"].astype(str) == proj_code]
             if len(proj_m21) > 0 and "严重等级" in m21_df.columns:
                 restrict_count = (proj_m21["严重等级"].astype(str).str.contains("限制投标", na=False)).sum()
-        m3_metrics.append({"name": "限制投标触发次数", "value": float(restrict_count)})
+        m3_metrics.append({"name": "限制投标条款触碰次数", "value": float(restrict_count)})
 
         # 4.3 付款条件优良率: 非2.1问题的项目占比
         payment_good = 1.0 if veto_count + restrict_count == 0 else 0.0
-        m3_metrics.append({"name": "付款条件优良率", "value": payment_good})
+        m3_metrics.append({"name": "付款条件合规度", "value": payment_good})
 
-        # 4.4 合同条款不利度: 模型2.4标记
+        # 4.4 合同条款不利度: 模型2.4标记（严重程度感知）
         m24_df = all_results.get("2.4", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
         clause_bad = 0.0
+        permit_ok = 1.0
         if len(m24_df) > 0 and "项目编码" in m24_df.columns:
             proj_m24 = m24_df[m24_df["项目编码"].astype(str) == proj_code]
-            clause_bad = 1.0 if len(proj_m24) > 0 else 0.0
+            if len(proj_m24) > 0:
+                # 合同条款不利度：按严重等级区分
+                if "问题分类" in proj_m24.columns:
+                    cats = proj_m24["问题分类"].astype(str)
+                    sevs = proj_m24["严重等级"].astype(str) if "严重等级" in proj_m24.columns else cats
+                    # 放弃优先受偿权/结算期超6月等严重条款 → 1.0, 其他不利条款 → 0.3
+                    if cats.str.contains("放弃优先受偿|结算期.*6.*月|需协助业主融资", na=False).any() or sevs.str.contains("red|严禁", na=False).any():
+                        clause_bad = 1.0
+                    else:
+                        clause_bad = 0.3
+                else:
+                    clause_bad = 0.3  # 有检出但无法判级 → 保守扣分
+
+                # 三证合规率: 许可证/三证问题
+                if "问题分类" in proj_m24.columns:
+                    permit_issues = (proj_m24["问题分类"].astype(str).str.contains("三证|许可证", na=False)).sum()
+                    sevs = proj_m24["严重等级"].astype(str) if "严重等级" in proj_m24.columns else pd.Series([""] * len(proj_m24))
+                    if permit_issues > 0:
+                        permit_ok = 0.0 if sevs.str.contains("red|严禁", na=False).any() else 0.3
         m3_metrics.append({"name": "合同条款不利度", "value": clause_bad})
 
-        # 4.5 三证合规率: 许可证/三证问题占比
-        permit_ok = 1.0
-        if len(m24_df) > 0 and "项目编码" in m24_df.columns and "问题分类" in m24_df.columns:
-            proj_m24 = m24_df[m24_df["项目编码"].astype(str) == proj_code]
-            permit_issues = (proj_m24["问题分类"].astype(str).str.contains("三证|许可证", na=False)).sum()
-            permit_ok = 0.0 if permit_issues > 0 else 1.0
+        # 4.5 三证合规率
         m3_metrics.append({"name": "三证合规率", "value": permit_ok})
 
         m3_results = engine.evaluate_batch(m3_metrics, project_start_date=row.get("开工时间"), level="project")
@@ -549,28 +516,50 @@ class DiscreteAnalyzer:
         conversion = max(0.0, min(2.0, conversion))
         m4_metrics.append({"name": "产值转化率", "value": conversion})
 
-        # 5.2 盈利健康度: A值
+        # 5.2 盈利健康度: A值（归一化：百分比→小数，兼容两种存储格式）
         a_value = safe_float(row.get("一次性经营效益率（%）（A值）", 0))
+        if a_value > 1.0:
+            a_value = a_value / 100.0
         m4_metrics.append({"name": "盈利健康度", "value": a_value})
 
-        # 5.3 停工退场率: 模型2.5标记
+        # 5.3 停工退场率: 模型2.5标记（严重程度感知：red/停工→1.0, 其他→0.3）
         m25_df = all_results.get("2.5", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
         stop_ratio = 0.0
         if len(m25_df) > 0 and "项目编码" in m25_df.columns:
             proj_m25 = m25_df[m25_df["项目编码"].astype(str) == proj_code]
-            stop_ratio = 1.0 if len(proj_m25) > 0 else 0.0
+            if len(proj_m25) > 0:
+                cats = proj_m25["问题分类"].astype(str)
+                sevs = proj_m25["严重等级"].astype(str) if "严重等级" in proj_m25.columns else cats
+                if cats.str.contains("停工|退场|停缓建", na=False).any() or sevs.str.contains("red|严禁", na=False).any():
+                    stop_ratio = 1.0   # 真正停工退场 → 一票否决
+                else:
+                    stop_ratio = 0.3   # 施工异常但非停工 → 扣分但不否决
         m4_metrics.append({"name": "停工退场率", "value": stop_ratio})
 
         # 5.4 签约履约偏差率: 老签约+低产值转化
-        sign_deviation = 1.0 if (conversion < 0.5 and row.get("_sign_year", 0) > 0) else 0.0
+        # derive sign_year from 签约时间 (not _sign_year, which is dropped before scoring)
+        sign_year = 0
+        sign_time = row.get("签约时间")
+        if sign_time is not None and not (isinstance(sign_time, float) and pd.isna(sign_time)):
+            try:
+                sign_year = pd.Timestamp(sign_time).year
+            except Exception:
+                pass
+        sign_deviation = 1.0 if (conversion < 0.5 and sign_year > 0) else 0.0
         m4_metrics.append({"name": "签约履约偏差率", "value": sign_deviation})
 
-        # 5.5 效益偏差率: 模型2.2
+        # 5.5 效益偏差率: 模型2.2（严重程度感知：red/严禁→1.0, 其他→0.3）
         m22_df = all_results.get("2.2", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
         profit_dev = 0.0
         if len(m22_df) > 0 and "项目编码" in m22_df.columns and "问题分类" in m22_df.columns:
             proj_m22 = m22_df[m22_df["项目编码"].astype(str) == proj_code]
-            profit_dev = 1.0 if (proj_m22["问题分类"].astype(str).str.contains("偏差|差异", na=False)).any() else 0.0
+            if len(proj_m22) > 0:
+                cats = proj_m22["问题分类"].astype(str)
+                sevs = proj_m22["严重等级"].astype(str) if "严重等级" in proj_m22.columns else cats
+                if sevs.str.contains("red|严禁|严重", na=False).any():
+                    profit_dev = 1.0   # 严重效益偏差
+                else:
+                    profit_dev = 0.3   # 轻微偏差
         m4_metrics.append({"name": "效益偏差率", "value": profit_dev})
 
         # 5.6 在施项目活跃度: 产值>0且收款>0
@@ -588,9 +577,10 @@ class DiscreteAnalyzer:
         # 6.1 资金占用率: 保证金/合同额（从模型2.3）
         m23_df = all_results.get("2.3", (pd.DataFrame(), {}))[0] if isinstance(all_results, dict) else pd.DataFrame()
         capital_bound = 0.0
-        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "保证金金额" in m23_df.columns:
+        proj_m23 = pd.DataFrame()
+        if len(m23_df) > 0 and "项目编码" in m23_df.columns:
             proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
-            if len(proj_m23) > 0:
+            if len(proj_m23) > 0 and "保证金金额" in m23_df.columns:
                 capital_bound = proj_m23["保证金金额"].apply(safe_float).sum()
         capital_occupancy = capital_bound / contract_amt if contract_amt > 0 else 0.0
         m5_metrics.append({"name": "资金占用率", "value": capital_occupancy})
@@ -598,29 +588,45 @@ class DiscreteAnalyzer:
         # 6.2 保证金周转天数: 从模型2.3问题描述提取（简化为0）
         m5_metrics.append({"name": "保证金周转天数", "value": 0.0})
 
-        # 6.3 逾期回收率: 项目2.3标记
+        # 6.3-6.6: 基于模型2.3的严重程度感知指标（一次查询，分项判定）
         overdue_ratio = 0.0
-        if len(m23_df) > 0 and "项目编码" in m23_df.columns:
-            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
-            overdue_ratio = 1.0 if len(proj_m23) > 0 else 0.0
+        advance_gap = 0.0
+        negative_flow = 0.0
+        if len(proj_m23) > 0 and "问题分类" in proj_m23.columns:
+            cats = proj_m23["问题分类"].astype(str)
+            sevs = proj_m23["严重等级"].astype(str) if "严重等级" in proj_m23.columns else cats
+            has_severe = sevs.str.contains("red|严禁|严重", na=False).any()
+
+            # 逾期回收率：检查逾期天数 ≥ 90天 → 严重
+            if cats.str.contains("逾期", na=False).any():
+                desc_col = "问题描述" if "问题描述" in proj_m23.columns else None
+                descs = proj_m23[desc_col].astype(str) if desc_col else pd.Series([""] * len(proj_m23))
+                severe_overdue = False
+                for d in descs:
+                    m = re.search(r"逾期\s*(\d+)\s*天", d)
+                    if m and int(m.group(1)) >= 90:
+                        severe_overdue = True
+                        break
+                overdue_ratio = 1.0 if severe_overdue else (0.5 if has_severe else 0.3)
+
+            # 预收款缺口率
+            if cats.str.contains("预收款", na=False).any():
+                advance_gap = 1.0 if has_severe else 0.3
+
+            # 负流项目占比
+            if cats.str.contains("负流|资金负", na=False).any():
+                negative_flow = 1.0 if has_severe else 0.5
+
         m5_metrics.append({"name": "逾期回收率", "value": overdue_ratio})
 
         # 6.4 资金回收率: 收款/签约
         collection_rate = collection / contract_amt if contract_amt > 0 else 0.0
         m5_metrics.append({"name": "资金回收率", "value": collection_rate})
 
-        # 6.5 预收款缺口率: 从模型2.3
-        advance_gap = 0.0
-        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "问题分类" in m23_df.columns:
-            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
-            advance_gap = 1.0 if (proj_m23["问题分类"].astype(str).str.contains("预收款", na=False)).any() else 0.0
+        # 6.5 预收款缺口率
         m5_metrics.append({"name": "预收款缺口率", "value": advance_gap})
 
-        # 6.6 负流项目占比: 从模型2.3
-        negative_flow = 0.0
-        if len(m23_df) > 0 and "项目编码" in m23_df.columns and "问题分类" in m23_df.columns:
-            proj_m23 = m23_df[m23_df["项目编码"].astype(str) == proj_code]
-            negative_flow = 1.0 if (proj_m23["问题分类"].astype(str).str.contains("负流|资金负", na=False)).any() else 0.0
+        # 6.6 负流项目占比
         m5_metrics.append({"name": "负流项目占比", "value": negative_flow})
 
         m5_results = engine.evaluate_batch(m5_metrics, project_start_date=row.get("开工时间"), level="project")

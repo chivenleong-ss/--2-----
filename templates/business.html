@@ -65,106 +65,6 @@
         </div>
     </section>
 
-    <!-- ═══════════════════════════════════════════════════════════
-       六模块评分规则 — 可折叠参考面板
-       ═══════════════════════════════════════════════════════════ -->
-    <section class="panel-glass rules-panel" id="scoringRulesPanel">
-        <div class="panel-head rules-head" id="rulesHead" style="cursor:pointer;">
-            <div>
-                <span class="panel-kicker">SCORING RULES REFERENCE</span>
-                <h2>📐 六模块评分规则</h2>
-            </div>
-            <button class="ghost-btn" type="button" id="rulesToggleBtn">收起 ▲</button>
-        </div>
-        <div class="rules-body" id="rulesBody">
-            <!-- 评分等级速查 -->
-            <div class="rules-grid">
-                <div class="rules-card">
-                    <div class="rules-card-title">单模块评分等级</div>
-                    <div class="rules-card-body">
-                        {% set bands = scoring_rules.score_bands or {} %}
-                        <div class="rule-row"><span class="rule-dot" style="background:#2f8f61;"></span> 强势区 ≥ {{ bands.get('强势区下限', 80) }} 分</div>
-                        <div class="rule-row"><span class="rule-dot" style="background:#c99518;"></span> 稳健区 {{ bands.get('稳健区下限', 65) }}–{{ bands.get('强势区下限', 80)-1 }} 分</div>
-                        <div class="rule-row"><span class="rule-dot" style="background:#cb5b4b;"></span> 承压区 &lt; {{ bands.get('稳健区下限', 65) }} 分</div>
-                    </div>
-                </div>
-                <div class="rules-card">
-                    <div class="rules-card-title">全局综合评级</div>
-                    <div class="rules-card-body">
-                        {% set gbands = scoring_rules.global_score_bands or {} %}
-                        <div class="rule-row"><span class="rule-dot" style="background:#2f8f61;"></span> 全局强势 ≥ {{ gbands.get('全局强势下限', 75) }} 分</div>
-                        <div class="rule-row"><span class="rule-dot" style="background:#c99518;"></span> 全局稳健 {{ gbands.get('全局稳健下限', 60) }}–{{ gbands.get('全局强势下限', 75)-1 }} 分</div>
-                        <div class="rule-row"><span class="rule-dot" style="background:#cb5b4b;"></span> 全局承压 &lt; {{ gbands.get('全局稳健下限', 60) }} 分</div>
-                        <div class="rule-note">全局阈值适度放宽，鼓励均衡发展（木桶效应下单一短板即可拉低全局分）</div>
-                    </div>
-                </div>
-                <div class="rules-card">
-                    <div class="rules-card-title">数据置信度</div>
-                    <div class="rules-card-body">
-                        {% set cl = scoring_rules.confidence_levels or {} %}
-                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1f89df;"></span> 高 ≥ {{ cl.get('高置信度下限', 80) }} 分（实心圆）</div>
-                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1f89df;opacity:0.7;border:2px solid #f59e0b;"></span> 中 {{ cl.get('中置信度下限', 50) }}–{{ cl.get('高置信度下限', 80)-1 }} 分（黄边）</div>
-                        <div class="rule-row"><span style="display:inline-block;width:10px;height:10px;background:#1f89df;opacity:0.45;border:2px dashed #d94d63;"></span> 低 &lt; {{ cl.get('中置信度下限', 50) }} 分（虚线菱形）</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 六模块权重 -->
-            <div class="rules-section-title">六模块权重分配</div>
-            <div class="rules-grid rules-grid-6">
-                {% set weights = scoring_rules.module_weights or {} %}
-                {% set mod_keys = ['模块一_区域布局', '模块二_客户稳定', '模块三_合同质量', '模块四_履约盈利', '模块五_资金效率', '模块六_数据质量'] %}
-                {% set mod_display = ['模块一：区域布局', '模块二：客户稳定', '模块三：合同质量', '模块四：履约盈利', '模块五：资金效率', '模块六：数据质量'] %}
-                {% for mk in mod_keys %}
-                <div class="rules-card rules-mod-card">
-                    <div class="rules-card-title">{{ mod_display[loop.index0] }}</div>
-                    <div class="rules-card-body">
-                        <strong class="rules-weight">{{ '%.0f'|format((weights.get(mk, 0) * 100)|round) }}%</strong>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-
-            <!-- 各模块子指标权重 -->
-            <div class="rules-section-title">子指标权重明细</div>
-            <div class="rules-grid rules-grid-3" id="subIndicatorGrid">
-                {% set mod_keys = ['module_1','module_2','module_3','module_4','module_5','module_6'] %}
-                {% set mod_titles = ['模块一：区域布局健康度','模块二：客户资源稳定性','模块三：合同质量与风险集中度','模块四：履约盈利健康度','模块五：资金效率与安全性','模块六：数据质量与流程规范'] %}
-                {% for mk in mod_keys %}
-                {% set sub = scoring_rules.get(mk, {}) %}
-                <div class="rules-card">
-                    <div class="rules-card-title">{{ mod_titles[loop.index0] }}</div>
-                    <div class="rules-card-body">
-                        {% if sub %}
-                        {% for ind_name, ind_weight in sub.items() %}
-                        <div class="rule-row rule-indicator"><span>{{ ind_name }}</span><strong>{{ '%.0f'|format((ind_weight * 100)|round) }}%</strong></div>
-                        {% endfor %}
-                        {% else %}
-                        <div class="rule-row">暂无子指标配置</div>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-
-            <!-- 评分引擎四大防线 -->
-            {% set engine = scoring_rules.scoring_engine or {} %}
-            {% if engine %}
-            <div class="rules-section-title">⚙️ 底层评分引擎 · {{ engine.get('version', '') }}</div>
-            <div class="rules-grid rules-grid-4">
-                {% for defence_name, defence_desc in (engine.get('defences') or {}).items() %}
-                <div class="rules-card rules-engine-card">
-                    <div class="rules-card-title">{{ defence_name.split('_', 1)[1] if '_' in defence_name else defence_name }}</div>
-                    <div class="rules-card-body">
-                        <p class="rule-desc">{{ defence_desc }}</p>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </div>
-    </section>
-
     <section class="health-hero">
         <div class="panel-head hero-panel-head">
             <div>
@@ -234,9 +134,15 @@
         <div class="panel-head">
             <div>
                 <span class="panel-kicker">MODULE DETAIL MATRIX</span>
-                <h2>六大模块指标矩阵</h2>
+                <h2>六大模块指标矩阵（v4.0 模型驱动）</h2>
             </div>
-                <span class="panel-note" id="moduleHint">固定展开视图，直接查看指标得分与业务值</span>
+            <div class="filter-toggles">
+                <button type="button" class="ghost-btn" id="abnormalToggle" onclick="toggleAbnormalOnly()">仅显示异常</button>
+                <button type="button" class="ghost-btn" id="redlineToggle" onclick="toggleRedlineOnly()">只看红线</button>
+                <button type="button" class="ghost-btn" onclick="expandAllModules()">全部展开</button>
+                <button type="button" class="ghost-btn" onclick="collapseAllModules()">全部折叠</button>
+            </div>
+                <span class="panel-note" id="moduleHint">v4.0: 34个合并指标来自底层模型检出 | 点击模块卡片展开/折叠 | 默认折叠仅显示得分</span>
         </div>
         <div class="module-matrix-grid" id="modulesGrid"></div>
     </section>
@@ -737,6 +643,39 @@
     gap: 16px;
     padding: 18px 20px 0;
 }
+/* v4.0 过滤器按钮 */
+.filter-toggles {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.filter-toggles .ghost-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+}
+.filter-toggles .ghost-btn.active {
+    background: #cb5b4b;
+    color: #fff;
+    border-color: #cb5b4b;
+}
+/* 红线指标高亮 */
+.metric-redline {
+    background: rgba(203,91,75,0.06);
+    border-left: 3px solid #cb5b4b;
+    padding-left: 10px;
+}
+/* 展开提示 */
+.expand-hint {
+    font-size: 0.7rem;
+    opacity: 0.5;
+    margin-left: 6px;
+}
+/* 折叠pointer */
+.capsule-head {
+    cursor: pointer;
+    user-select: none;
+}
 
 .module-capsule {
     position: relative;
@@ -795,6 +734,15 @@
     background: rgba(255, 255, 255, 0.72);
 }
 
+.capsule-insight {
+    padding: 8px 0 0;
+    color: #5f7388;
+    font-size: 12px;
+    line-height: 1.6;
+    border-top: 1px solid #edf2f7;
+    margin-top: 8px;
+}
+
 .capsule-summary {
     margin-top: 12px;
     color: #6b7d88;
@@ -845,6 +793,57 @@
     line-height: 1.45;
     color: rgba(115, 135, 146, 0.82);
     font-weight: 500;
+}
+
+.metric-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.metric-type-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: #475569;
+    background: rgba(226, 232, 240, 0.82);
+}
+
+.metric-type-badge.independent_score {
+    color: #0f766e;
+    background: rgba(204, 251, 241, 0.88);
+}
+
+.metric-type-badge.risk_rate {
+    color: #b45309;
+    background: rgba(254, 240, 138, 0.88);
+}
+
+.metric-type-badge.module_proxy {
+    color: #475569;
+    background: rgba(226, 232, 240, 0.88);
+}
+
+.metric-score-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.metric-rate {
+    font-size: 10px;
+    line-height: 1.3;
+    color: #8a5a00;
+    font-weight: 700;
+    text-align: right;
 }
 
 .metric-score {
@@ -1177,47 +1176,55 @@ const MODULE_DETAIL_LABELS = [
     "模块六：数据质量与流程规范",
 ];
 const MODULE_METRIC_NAMES = [
-    ["区域渗透率", "跨区域经营指数", "深耕区域集中度", "区域合同额强度", "业务结构偏离度", "EPC转型进度"],
-    ["客户稳定性指数", "客户产出波动率", "客户集中度风险", "中标转化率", "新客户质量指数", "战略客户产出比"],
-    ["风险项目占比", "风险合同额集中度", "付款条件优良率", "合同条款不利度", "三证合规率"],
-    ["产值转化率", "签约履约偏差率", "盈利健康度", "停工退场率", "效益偏差率", "在施项目活跃度"],
-    ["资金占用率", "保证金周转天数", "逾期回收率", "预收款缺口率", "负流项目占比"],
-    ["数据完整率", "流程合规率", "中标签约偏差率", "测算规律性指数", "签约延迟率"],
+    // 模块一：区域布局（v4.0: 1.1+1.2驱动，6个合并指标）
+    ["跨区域经营合规🔴", "区域覆盖质量", "业务结构偏离", "EPC转型进度", "战略新兴业务缺口", "区域发展偏离"],
+    // 模块二：客户稳定（v4.0: 1.3+3.1+3.2驱动，6个合并指标）
+    ["客户集中度综合", "战略客户管理", "优质客户占比", "中标转化异常", "客户活跃度异常🔴", "新客户结构质量"],
+    // 模块三：合同质量（v4.0: 2.1+2.4驱动，8个合并指标）
+    ["严禁投标红线集🔴", "限制投标风险", "付款条件校验", "无限责任条款🔴", "放弃优先受偿权🔴", "停缓建不利🔴", "三证不全🔴", "质保金偏高"],
+    // 模块四：履约盈利（v4.0: 2.2+2.5驱动，4个合并指标）
+    ["A值底部亏损🔴", "效益偏差", "施工真实性异常🔴", "签约履约偏差"],
+    // 模块五：资金效率（v4.0: 2.3驱动，4个合并指标）
+    ["现金保证金占用", "资金逾期回收🔴", "联合体超额担保🔴", "资金负流🔴"],
+    // 模块六：数据质量（v4.0: 1.4驱动，6个合并指标）
+    ["流程时间倒置🔴", "利润率规律异常🔴", "中标签约金额偏离", "签约逾期", "凑量嫌疑", "邀请招标比例过高"],
 ];
+
 const METRIC_FORMULAS = {
-    "区域渗透率": "落地城市数 ÷ 授权深耕城市数",
-    "跨区域经营指数": "非常规区域合同额 ÷ 总合同额",
-    "深耕区域集中度": "深耕区域合同额 ÷ 总合同额",
-    "区域合同额强度": "总签约额 ÷ 落地城市数",
-    "业务结构偏离度": "实际业务占比与155目标占比的偏离加权值",
-    "EPC转型进度": "EPC项目合同额 ÷ 总合同额",
-    "客户稳定性指数": "连续合作客户数 ÷ 客户总数",
-    "客户产出波动率": "客户合同额标准差 ÷ 客户合同额均值",
-    "客户集中度风险": "前5大客户合同额 ÷ 总合同额",
-    "中标转化率": "已签约中标项目数 ÷ 中标项目总数",
-    "新客户质量指数": "优质新客户数 ÷ 新客户总数",
-    "战略客户产出比": "战略及优质客户合同额 ÷ 总合同额",
-    "风险项目占比": "高风险项目数 ÷ 总项目数",
-    "风险合同额集中度": "风险项目合同额 ÷ 总合同额",
-    "付款条件优良率": "付款条件合规项目数 ÷ 总项目数",
-    "合同条款不利度": "不利条款项目数 ÷ 总项目数",
-    "三证合规率": "三证齐备项目数 ÷ 总项目数",
-    "产值转化率": "实际完成产值 ÷ 签约额",
-    "签约履约偏差率": "签约满12个月且产值转化不足项目数 ÷ 总项目数",
-    "盈利健康度": "A值达标项目数 ÷ 总项目数",
-    "停工退场率": "停工或退场项目数 ÷ 总项目数",
-    "效益偏差率": "实际利润偏离目标项目数 ÷ 总项目数",
-    "在施项目活跃度": "正常在施项目数 ÷ 在施项目总数",
-    "资金占用率": "资金占用额 ÷ 签约额",
-    "保证金周转天数": "保证金回收平均天数",
-    "逾期回收率": "逾期回收额 ÷ 逾期应收总额",
-    "预收款缺口率": "预收款缺口额 ÷ 预收款应收额",
-    "负流项目占比": "现金净流出项目数 ÷ 总项目数",
-    "数据完整率": "关键字段非空数 ÷ 应填字段总数",
-    "流程合规率": "流程节点合规项目数 ÷ 总项目数",
-    "中标签约偏差率": "中标后超阈值未签约项目数 ÷ 中标项目总数",
-    "测算规律性指数": "测算偏差在阈值内项目数 ÷ 总项目数",
-    "签约延迟率": "超计划签约项目数 ÷ 总项目数",
+    "跨区域经营合规🔴": "1.1: 窜区(red)+非常规区域未达门槛(yellow)合并",
+    "区域覆盖质量": "1.1: 深耕区域占比+授权城市覆盖合并",
+    "业务结构偏离": "1.2: 六大板块实际占比 vs 155年度目标",
+    "EPC转型进度": "1.2: EPC项目合同额占比 < 50%",
+    "战略新兴业务缺口": "1.2: 城市更新+新兴业务合同额占比各<5%",
+    "区域发展偏离": "1.2: 四大区域实际占比 vs 155区域目标",
+    "客户集中度综合": "1.3+3.2: 前5大客户集中度(>60%)+行业HHI(>0.5)",
+    "战略客户管理": "1.3: 战略客户合同额占比 < 35%",
+    "优质客户占比": "1.3: 优质客户合同额占比 < 35%",
+    "中标转化异常": "3.1: 中标转化率<60%+中标未签约客户合并",
+    "客户活跃度异常🔴": "3.1: 僵尸(>24月)+流失(>12月)+优质僵尸合并",
+    "新客户结构质量": "3.2: 政府/国企新客户<50%+地产依赖>50%合并",
+    "严禁投标红线集🔴": "2.1: 全部red级(地产付款/非现金/垫资/放弃优先受偿权/现金保证金/破产业主)",
+    "限制投标风险": "2.1: 非地产付款不达标+yellow限制投标合并",
+    "付款条件校验": "2.1: DMP付款条件标记 vs 实际规则计算交叉校验",
+    "无限责任条款🔴": "2.4: 承包人违约无上限+工期违约金无上限",
+    "放弃优先受偿权🔴": "2.1+2.4: 跨模型同概念合并",
+    "停缓建不利🔴": "2.4: 禁止停缓建且无索赔权利",
+    "三证不全🔴": "2.4: 规划/建设/土地三证不全即实质性开工",
+    "质保金偏高": "2.4: 质保金支付比例 > 5%",
+    "A值底部亏损🔴": "2.2: 一次性经营效益率(A值) < 制度底线(地产≥0%/非地产≥4-6%)",
+    "效益偏差": "2.2: 备案A值 vs 实际利润率偏差 > 1%",
+    "施工真实性异常🔴": "2.5: 在施状态存疑+停工退场停缓建合并",
+    "签约履约偏差🔴": "2.5: 签约>12月 且 产值转化率<10%",
+    "现金保证金占用": "2.3: 现金投标保证金+现金履约保证金合并",
+    "资金逾期回收🔴": "2.3: 保证金逾期(>90天red)+预收款逾期合并",
+    "联合体超额担保🔴": "2.3: 联合体项目履约担保 > 合同额10%",
+    "资金负流🔴": "2.3: 资金结余 < 0",
+    "流程时间倒置🔴": "1.4: 招文→交标→中标→签约四段时序倒置合并",
+    "利润率规律异常🔴": "1.4: 同单位同年A值标准差 < 0.5%, 疑似编造",
+    "中标签约金额偏离": "1.4: |中标额-签约额|/中标额 > 5%",
+    "签约逾期": "1.4: 预计签约逾期+中标后>180天未签约合并",
+    "凑量嫌疑": "1.4: 同一客户90天内集中签约≥2项目",
+    "邀请招标比例过高": "1.4: 邀请招标项目数/总数 > 70%",
 };
 
 let BIZ_CONFIG = {
@@ -1260,6 +1267,15 @@ function getModuleTone(score){
         return {label: "稳健", color: "#c99518", soft: "rgba(201,149,24,0.14)"};
     }
     return {label: "承压", color: "#cb5b4b", soft: "rgba(203,91,75,0.14)"};
+}
+
+function getModuleInsightText(moduleId, score) {
+    const insights = BIZ_CONFIG.module_insights || {};
+    const mod = insights[String(moduleId)] || {};
+    const tone = getModuleTone(score);
+    if (tone.label === "强势") return mod.strong || "";
+    if (tone.label === "稳健") return mod.steady || "";
+    return (mod.pressure || "") + (mod.advice ? " → " + mod.advice : "");
 }
 
 function getGlobalTone(score){
@@ -1816,47 +1832,115 @@ async function loadModuleDetails(){
 function metricPairs(moduleId){
     const scoped = resolveScopedRecord();
     const scopedRecord = scoped.record || {};
-    const scopedMetricNames = MODULE_METRIC_NAMES[moduleId - 1] || [];
-    if(scoped.record){
-        return scopedMetricNames.map(name => {
-            const raw = scopedRecord[name];
-            const score = num(raw, 0);
-            const unit = (name.includes("率") || name.includes("比") || name.includes("度") || name.includes("指数")) ? "%" : "";
-            return {
-                name,
-                score: fmt(score, 1) + unit,
-                formula: METRIC_FORMULAS[name] || "按当前业务口径自动测算",
-            };
-        });
+    const detail = moduleDetails[moduleId] || {};
+    if(Array.isArray(detail.metric_cards) && detail.metric_cards.length){
+        return detail.metric_cards.map(item => ({
+            name: item.name,
+            metricType: item.metric_type || "risk_rate",
+            typeLabel: metricTypeLabel(item.metric_type || "risk_rate"),
+            scoreMode: item.score_mode || (item.metric_type || "risk_rate"),
+            scoreModeLabel: scoreModeLabel(item.score_mode || (item.metric_type || "risk_rate")),
+            score: fmt(item.display_score ?? 0, 1),
+            rawScore: num(item.display_score, 0),
+            anomalyRate: item.anomaly_rate,
+            formula: item.formula || "模型驱动评分",
+            scoreFormula: sanitizeScoreFormula(item.score_formula || ""),
+        }));
     }
 
-    const detail = moduleDetails[moduleId] || {};
-    const metrics = detail.metrics || {};
-    const names = Object.keys(metrics);
+    // v4.0: fallback to old display labels
+    const names = MODULE_METRIC_NAMES[moduleId - 1] || [];
+    // Module overall score from scoped data
+    const moduleScoreKey = '模块' + ['一','二','三','四','五','六'][moduleId - 1] + '_得分';
+    const moduleScore = num(scopedRecord[moduleScoreKey], 0);
+
     return names.map(name => {
-        const raw = metrics[name];
-        const value = raw && typeof raw === "object" ? raw.value : raw;
-        const score = num(value, 0);
-        const unit = (name.includes("率") || name.includes("比") || name.includes("度") || name.includes("指数")) ? "%" : "";
+        // Strip emoji markers from lookup key (backend keys are plain text)
+        const lookupKey = name.replace('🔴', '').replace('[R]', '');
+        const raw = scopedRecord[lookupKey] ?? scopedRecord[name] ?? (detail.metrics || {})[lookupKey] ?? (detail.metrics || {})[name];
+        const score = num(raw, 0);
+        const hasRawValue = !(raw === null || typeof raw === "undefined" || raw === "");
+        const displayScore = hasRawValue ? score : moduleScore;
         return {
             name,
-            score: fmt(score, 1) + unit,
-            formula: typeof raw === "object" && raw !== null && raw.formula ? String(raw.formula) : (METRIC_FORMULAS[name] || "按当前业务口径自动测算"),
+            metricType: "risk_rate",
+            typeLabel: metricTypeLabel("risk_rate"),
+            scoreMode: "issue_rate",
+            scoreModeLabel: scoreModeLabel("issue_rate"),
+            score: fmt(displayScore, 1),
+            rawScore: displayScore,
+            formula: METRIC_FORMULAS[name] || '模型驱动评分',
+            scoreFormula: "正向得分 = (1 - 异常率) × 100",
         };
     });
 }
 
+function metricTypeLabel(type){
+    if(type === "independent_score") return "独立评分";
+    if(type === "risk_rate") return "风险率";
+    return "综合评分";
+}
+
+function scoreModeLabel(mode){
+    if(mode === "issue_rate") return "问题率型";
+    if(mode === "target_score") return "目标达成型";
+    if(mode === "composite_score") return "合成型";
+    return "综合型";
+}
+
+function sanitizeScoreFormula(text){
+    const value = String(text || "");
+    if(value.includes("沿用模块") || value.includes("模块审计综合分")){
+        return "正向得分 = (1 - 异常率) × 100";
+    }
+    return value;
+}
+
+let showAbnormalOnly = false;
+let showRedlineOnly = false;
+
+function toggleAbnormalOnly(){
+    showAbnormalOnly = !showAbnormalOnly;
+    document.getElementById("abnormalToggle").classList.toggle("active", showAbnormalOnly);
+    if(showAbnormalOnly) showRedlineOnly = false, document.getElementById("redlineToggle").classList.remove("active");
+    renderModules();
+}
+function toggleRedlineOnly(){
+    showRedlineOnly = !showRedlineOnly;
+    document.getElementById("redlineToggle").classList.toggle("active", showRedlineOnly);
+    if(showRedlineOnly) showAbnormalOnly = false, document.getElementById("abnormalToggle").classList.remove("active");
+    renderModules();
+}
+function expandAllModules(){ document.querySelectorAll(".metric-list").forEach(el => el.style.display = ""); }
+function collapseAllModules(){ document.querySelectorAll(".metric-list").forEach(el => el.style.display = "none"); }
+
 function renderModules(){
     const host = document.getElementById("modulesGrid");
     const scoped = resolveScopedRecord();
+    const summary = summaryData();
     host.innerHTML = [1, 2, 3, 4, 5, 6].map(id => {
         const detail = moduleDetails[id] || {};
-        const score = num(scoped.moduleValues?.[id - 1], num(detail.score, summaryData().moduleValues[id - 1] || 0));
+        const score = num(scoped.moduleValues?.[id - 1], num(detail.score, summary.moduleValues[id - 1] || 0));
         const tone = getModuleTone(score);
+        const insightText = getModuleInsightText(id, score);
         const metrics = metricPairs(id);
+
+        // Apply filters
+        let filteredMetrics = metrics;
+        if(showRedlineOnly){
+            filteredMetrics = metrics.filter(m => m.name.includes("🔴") || m.name.includes("[R]"));
+        }
+        if(showAbnormalOnly && !showRedlineOnly){
+            filteredMetrics = metrics.filter(m => {
+                const val = parseFloat(m.score);
+                return !isNaN(val) && val < 65;
+            });
+        }
+        const showExpand = metrics.length > 0;
+
         return `
-            <article class="module-capsule" style="border-color:${tone.color}22;">
-                <div class="capsule-head">
+            <article class="module-capsule" style="border-color:${tone.color}22;" data-module="${id}">
+                <div class="capsule-head" onclick="var ml=this.parentElement.querySelector('.metric-list'); ml.style.display = ml.style.display === 'none' ? '' : 'none';">
                     <div>
                         <div class="capsule-index">Module ${id}</div>
                         <div class="capsule-title">${MODULE_DETAIL_LABELS[id - 1]}</div>
@@ -1864,18 +1948,28 @@ function renderModules(){
                     <div class="capsule-score">
                         <strong style="color:${tone.color};">${fmt(score, 1)}</strong>
                         <span class="capsule-tone" style="color:${tone.color}; background:${tone.soft};">${tone.label}</span>
+                        ${showExpand ? '<span class="expand-hint">展开</span>' : ""}
                     </div>
                 </div>
-                <div class="metric-list">
-                    ${metrics.length ? metrics.map(item => `
-                        <div class="metric-row">
+                ${insightText ? `<div class="capsule-insight">${insightText}</div>` : ""}
+                <div class="metric-list" style="display:none;">
+                    ${filteredMetrics.length ? filteredMetrics.map(item => `
+                        <div class="metric-row ${item.name.includes('🔴') || item.name.includes('[R]') ? 'metric-redline' : ''}">
                             <div class="metric-main">
-                                <div class="metric-label">${item.name}</div>
+                                <div class="metric-meta">
+                                    <div class="metric-label">${item.name}</div>
+                                    <span class="metric-type-badge ${item.metricType}">${item.typeLabel}</span>
+                                </div>
+                                <div class="metric-formula">评分方式：${item.scoreModeLabel}</div>
                                 <div class="metric-formula">${item.formula}</div>
+                                <div class="metric-formula">${item.scoreFormula || ""}</div>
                             </div>
-                            <div class="metric-score">${item.score}</div>
+                            <div class="metric-score-wrap">
+                                <div class="metric-score" style="color:${getModuleTone(parseFloat(item.score)||0).color};">${item.score}</div>
+                                ${item.metricType === "risk_rate" ? `<div class="metric-rate">异常率 ${fmt(item.anomalyRate || 0, 1)}%</div>` : ``}
+                            </div>
                         </div>
-                    `).join("") : `<div class="metric-row"><div class="metric-main"><div class="metric-label">暂无指标数据</div><div class="metric-formula">等待分析结果后自动生成</div></div><div class="metric-score">--</div></div>`}
+                    `).join("") : `<div class="metric-row"><div class="metric-main"><div class="metric-label">无异常检出</div><div class="metric-formula">该模块未发现模型检出问题</div></div><div class="metric-score" style="color:#2f8f61;">100</div></div>`}
                 </div>
             </article>
         `;
@@ -2233,20 +2327,6 @@ function wireEvents(){
     });
 
     window.addEventListener("resize", drawActiveChart);
-
-    // ── 评分规则面板折叠/展开 ──
-    const rulesBody = document.getElementById("rulesBody");
-    const rulesToggleBtn = document.getElementById("rulesToggleBtn");
-    const rulesHead = document.getElementById("rulesHead");
-    if(rulesHead && rulesBody && rulesToggleBtn){
-        const toggleRules = () => {
-            const hidden = rulesBody.style.display === "none";
-            rulesBody.style.display = hidden ? "" : "none";
-            rulesToggleBtn.textContent = hidden ? "收起 ▲" : "展开 ▼";
-        };
-        rulesHead.addEventListener("click", toggleRules);
-        rulesToggleBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleRules(); });
-    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

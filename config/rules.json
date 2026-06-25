@@ -762,41 +762,11 @@
       "三证合规率": {
         "type": "direct_linear",
         "is_veto": false,
-        "description": "施工许可证、规划许可证、用地许可证齐全的项目占比。",
+        "description": "施工许可证、规划许可证、用地许可证合规程度。0=严重缺失, 0.3=轻微问题, 1.0=三证齐全。",
         "thresholds": [
-          {
-            "value_range": [
-              0.95,
-              1.0
-            ],
-            "score_range": [
-              80,
-              100
-            ],
-            "label": "优秀"
-          },
-          {
-            "value_range": [
-              0.7,
-              0.95
-            ],
-            "score_range": [
-              40,
-              80
-            ],
-            "label": "及格线区间"
-          },
-          {
-            "value_range": [
-              0.0,
-              0.7
-            ],
-            "score_range": [
-              0,
-              40
-            ],
-            "label": "不合格区"
-          }
+          {"value_range": [0.5, 1.0], "score_range": [60, 100], "label": "合规"},
+          {"value_range": [0.1, 0.5], "score_range": [20, 60], "label": "部分缺失"},
+          {"value_range": [0.0, 0.1], "score_range": [0, 20], "label": "严重缺失"}
         ]
       }
     },
@@ -857,86 +827,22 @@
       "停工退场率": {
         "type": "direct_linear",
         "is_veto": true,
-        "description": "停工/退场/停缓建项目数÷总项目数。红线指标，退场即一票否决。",
+        "description": "停工/退场/停缓建严重程度。0=全在施, 0.3=施工异常, 1.0=真正停工退场→一票否决。",
         "thresholds": [
-          {
-            "value_range": [
-              0.0,
-              0.0
-            ],
-            "score": 100,
-            "label": "全部在施"
-          },
-          {
-            "value_range": [
-              0.0,
-              0.05
-            ],
-            "score_range": [
-              100,
-              65
-            ],
-            "label": "零星停工"
-          },
-          {
-            "value_range": [
-              0.05,
-              0.2
-            ],
-            "score_range": [
-              65,
-              30
-            ],
-            "label": "较大停工面"
-          },
-          {
-            "value_range": [
-              0.2,
-              null
-            ],
-            "score": 0,
-            "label": "大面积停退"
-          }
+          {"value_range": [0.0, 0.0], "score": 100, "label": "全部在施"},
+          {"value_range": [0.0, 0.3], "score_range": [100, 55], "label": "施工异常"},
+          {"value_range": [0.3, 0.7], "score_range": [55, 15], "label": "较严重问题"},
+          {"value_range": [0.7, null], "score": 0, "label": "停工退场→一票否决"}
         ]
       },
       "效益偏差率": {
         "type": "direct_linear",
         "is_veto": false,
-        "description": "A值与实际利润率偏差>1%的项目占比（模型2.2检出）。",
+        "description": "A值与实际利润率偏差检出（严重程度：0=无偏差, 0.3=轻微, 1.0=严重偏差）。",
         "thresholds": [
-          {
-            "value_range": [
-              0.0,
-              0.05
-            ],
-            "score_range": [
-              100,
-              80
-            ],
-            "label": "测算准确"
-          },
-          {
-            "value_range": [
-              0.05,
-              0.2
-            ],
-            "score_range": [
-              80,
-              40
-            ],
-            "label": "有一定偏差"
-          },
-          {
-            "value_range": [
-              0.2,
-              null
-            ],
-            "score_range": [
-              40,
-              0
-            ],
-            "label": "测算失实"
-          }
+          {"value_range": [0.0, 0.1], "score_range": [100, 65], "label": "测算准确"},
+          {"value_range": [0.1, 0.5], "score_range": [65, 25], "label": "有一定偏差"},
+          {"value_range": [0.5, null], "score_range": [25, 0], "label": "测算失实"}
         ]
       },
       "在施项目活跃度": {
@@ -977,6 +883,56 @@
               40
             ],
             "label": "活跃度不足"
+          }
+        ]
+      },
+      "产值转化率": {
+        "type": "direct_linear",
+        "is_veto": false,
+        "exempt_days": 180,
+        "description": "实际完成产值÷签约额。新项目豁免，按默认稳健分。",
+        "thresholds": [
+          {
+            "value_range": [0.0, 0.2],
+            "score_range": [0, 30],
+            "label": "严重滞后"
+          },
+          {
+            "value_range": [0.2, 0.5],
+            "score_range": [30, 60],
+            "label": "爬坡期"
+          },
+          {
+            "value_range": [0.5, 0.8],
+            "score_range": [60, 80],
+            "label": "基本达标"
+          },
+          {
+            "value_range": [0.8, 1.0],
+            "score_range": [80, 100],
+            "label": "优秀"
+          },
+          {
+            "value_range": [1.0, null],
+            "score": 100,
+            "label": "超额完成"
+          }
+        ]
+      },
+      "签约履约偏差率": {
+        "type": "direct_step",
+        "is_veto": false,
+        "description": "签约超过1年但产值转化率<50%的项目标识。老签低产=履约异常信号。",
+        "thresholds": [
+          {
+            "value_range": [0, 0],
+            "score": 100,
+            "label": "无偏差"
+          },
+          {
+            "value_range": [1, null],
+            "score": 0,
+            "label": "偏差项目"
           }
         ]
       }
@@ -1036,91 +992,23 @@
       "逾期回收率": {
         "type": "direct_linear",
         "is_veto": true,
-        "description": "逾期>90天的应收项目数÷总项目数。直接触碰红线→一票否决。",
+        "description": "逾期严重程度。0=零逾期, 0.3=轻微逾期, 0.5=中度, 1.0=逾期≥90天→一票否决。",
         "thresholds": [
-          {
-            "value_range": [
-              0.0,
-              0.0
-            ],
-            "score": 100,
-            "label": "零逾期"
-          },
-          {
-            "value_range": [
-              0.0,
-              0.1
-            ],
-            "score_range": [
-              100,
-              65
-            ],
-            "label": "少量逾期"
-          },
-          {
-            "value_range": [
-              0.1,
-              0.3
-            ],
-            "score_range": [
-              65,
-              30
-            ],
-            "label": "较大逾期面"
-          },
-          {
-            "value_range": [
-              0.3,
-              null
-            ],
-            "score": 0,
-            "label": "大面积逾期"
-          }
+          {"value_range": [0.0, 0.0], "score": 100, "label": "零逾期"},
+          {"value_range": [0.0, 0.3], "score_range": [100, 55], "label": "轻微逾期"},
+          {"value_range": [0.3, 0.7], "score_range": [55, 15], "label": "较严重逾期"},
+          {"value_range": [0.7, null], "score": 0, "label": "严重逾期→一票否决"}
         ]
       },
       "负流项目占比": {
         "type": "direct_linear",
         "is_veto": true,
-        "description": "资金净流出项目数÷总项目数。现金流断裂预警，一票否决指标。",
+        "description": "资金负流严重程度。0=无负流, 0.5=资金紧张, 1.0=严重负流→一票否决。",
         "thresholds": [
-          {
-            "value_range": [
-              0.0,
-              0.0
-            ],
-            "score": 100,
-            "label": "无负流"
-          },
-          {
-            "value_range": [
-              0.0,
-              0.15
-            ],
-            "score_range": [
-              100,
-              65
-            ],
-            "label": "少量负流"
-          },
-          {
-            "value_range": [
-              0.15,
-              0.4
-            ],
-            "score_range": [
-              65,
-              30
-            ],
-            "label": "负流面较大"
-          },
-          {
-            "value_range": [
-              0.4,
-              null
-            ],
-            "score": 0,
-            "label": "大面积负流"
-          }
+          {"value_range": [0.0, 0.0], "score": 100, "label": "无负流"},
+          {"value_range": [0.0, 0.3], "score_range": [100, 55], "label": "轻微紧张"},
+          {"value_range": [0.3, 0.7], "score_range": [55, 15], "label": "资金紧张"},
+          {"value_range": [0.7, null], "score": 0, "label": "严重负流→一票否决"}
         ]
       },
       "资金占用率": {
@@ -1206,41 +1094,11 @@
       "预收款缺口率": {
         "type": "direct_linear",
         "is_veto": false,
-        "description": "存在预收款缺口的项目占比。",
+        "description": "预收款缺口严重程度。0=无缺口, 0.3=轻微缺口, 1.0=严重缺口。",
         "thresholds": [
-          {
-            "value_range": [
-              0.0,
-              0.05
-            ],
-            "score_range": [
-              100,
-              80
-            ],
-            "label": "缺口小"
-          },
-          {
-            "value_range": [
-              0.05,
-              0.25
-            ],
-            "score_range": [
-              80,
-              40
-            ],
-            "label": "缺口中等"
-          },
-          {
-            "value_range": [
-              0.25,
-              null
-            ],
-            "score_range": [
-              40,
-              0
-            ],
-            "label": "大面积缺口"
-          }
+          {"value_range": [0.0, 0.1], "score_range": [100, 65], "label": "缺口小"},
+          {"value_range": [0.1, 0.5], "score_range": [65, 25], "label": "缺口中等"},
+          {"value_range": [0.5, null], "score_range": [25, 0], "label": "大面积缺口"}
         ]
       }
     },
@@ -1938,5 +1796,174 @@
         "颜色": "yellow"
       }
     }
+  },
+  "module_model_mapping": {
+    "_description": "v4.0 模型驱动架构：每个模块从哪些底层模型的issues_df读取何种问题分类",
+    "模块一_区域布局": {
+      "来源模型": [
+        "1.1",
+        "1.2"
+      ],
+      "问题分类映射": {
+        "1.1": [
+          "窜区",
+          "非常规区域未达门槛",
+          "深耕区域占比不足",
+          "授权城市未破零"
+        ],
+        "1.2": [
+          "业务结构目标偏离",
+          "EPC转型滞后",
+          "城市更新业务不足",
+          "新兴业务拓展不足",
+          "区域发展目标偏离"
+        ]
+      }
+    },
+    "模块二_客户稳定": {
+      "来源模型": [
+        "1.3",
+        "3.1",
+        "3.2"
+      ],
+      "问题分类映射": {
+        "1.3": [
+          "客户集中度过高",
+          "战略客户合同额占比低",
+          "优质客户合同额占比低"
+        ],
+        "3.1": [
+          "僵尸客户",
+          "客户流失预警",
+          "中标未签约客户",
+          "中标转化率偏低",
+          "高评级零产出",
+          "高产出未评优",
+          "高端优质标记不一致",
+          "优质僵尸客户"
+        ],
+        "3.2": [
+          "新客户质量偏低",
+          "新客户地产依赖",
+          "新客户二次合作间隔过长",
+          "客户行业集中度过高"
+        ]
+      }
+    },
+    "模块三_合同质量": {
+      "来源模型": [
+        "2.1",
+        "2.4"
+      ],
+      "问题分类映射": {
+        "2.1": [
+          "地产类付款条件不达标",
+          "非地产类付款比例不达标",
+          "非现金支付",
+          "垫资",
+          "放弃优先受偿权",
+          "现金履约保证金",
+          "结算",
+          "失信|破产|诉讼",
+          "限制投标风险"
+        ],
+        "2.4": [
+          "承包人违约责任无上限",
+          "工期违约金无上限",
+          "放弃优先受偿权",
+          "极端不利停缓建条款",
+          "三证不全已开工",
+          "质保金比例偏高",
+          "结算周期过长"
+        ]
+      }
+    },
+    "模块四_履约盈利": {
+      "来源模型": [
+        "2.2",
+        "2.5"
+      ],
+      "问题分类映射": {
+        "2.2": [
+          "承接即亏损",
+          "效益偏差",
+          "备案合同合同额存疑"
+        ],
+        "2.5": [
+          "在施状态存疑",
+          "停工退场停缓建预警",
+          "签约后长期微量履约"
+        ]
+      }
+    },
+    "模块五_资金效率": {
+      "来源模型": [
+        "2.3"
+      ],
+      "问题分类映射": {
+        "2.3": [
+          "现金投标保证金",
+          "现金履约保证金",
+          "保证金逾期未回收",
+          "保证金延期回收",
+          "预收款逾期",
+          "预收款逾期未收",
+          "预收款延期到账",
+          "联合体超额担保",
+          "资金负流"
+        ]
+      }
+    },
+    "模块六_数据质量": {
+      "来源模型": [
+        "1.4"
+      ],
+      "问题分类映射": {
+        "1.4": [
+          "招文领取与交标时间倒置",
+          "交标与中标时间倒置",
+          "中标与签约时间倒置",
+          "签约与签约报量时间倒置",
+          "中标签约金额偏离",
+          "预计签约逾期",
+          "中标后长期未签约",
+          "利润率规律性异常",
+          "凑量嫌疑",
+          "邀请招标比例过高"
+        ]
+      }
+    }
+  },
+  "scoring": {
+    "_description": "v4.0 模型驱动评分配置：归一化扣分制",
+    "issue_penalty": {
+      "red": {
+        "base": 15,
+        "severity_multiplier": 2.0
+      },
+      "严禁投标": {
+        "base": 15,
+        "severity_multiplier": 2.0
+      },
+      "限制投标": {
+        "base": 8,
+        "severity_multiplier": 1.0
+      },
+      "yellow": {
+        "base": 5,
+        "severity_multiplier": 1.0
+      }
+    },
+    "penalty_scale": 20,
+    "single_issue_cap": 30,
+    "hybrid_thresholds": {
+      "cold_start_strong": 80,
+      "cold_start_steady": 65,
+      "min_strong": 75,
+      "min_steady": 60,
+      "percentile_strong": 67,
+      "percentile_steady": 33
+    },
+    "_calibration_note": "penalty_scale=20: 1red/100项目=94分, 1yellow/10项目=90分, 5yellow/20项目=75分, 3red+5yellow/50项目=54分"
   }
 }

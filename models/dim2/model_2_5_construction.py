@@ -100,8 +100,8 @@ class Model25Construction(BaseModel):
                 if sign_date is not None and not (isinstance(sign_date, float) and pd.isna(sign_date)):
                     months_since_sign = (now - sign_date).days / 30
 
-                # 3a. 签约>12月 且 产值转化率<30% → 签约虚高或履约严重滞后
-                if months_since_sign is not None and months_since_sign > 12 and output_ratio < 0.30:
+                # 3a. 签约>12月 且 产值转化率<10% → 签约虚高或履约严重滞后
+                if months_since_sign is not None and months_since_sign > 12 and output_ratio < 0.10:
                     issues.append({
                         "type": "签约后长期微量履约",
                         "desc": (
@@ -110,17 +110,6 @@ class Model25Construction(BaseModel):
                             "签约虚高或履约严重滞后"
                         ),
                         "severity": "red"
-                    })
-                # 3b. 产值转化率<50%（排除完全未开工和已在3a覆盖的）
-                elif output_ratio < 0.50:
-                    issues.append({
-                        "type": "签约额与产值偏离",
-                        "desc": (
-                            f"产值转化率仅{output_ratio:.1%}"
-                            f"（产值{actual_output/1e8:.2f}亿 / 签约额{contract_amt/1e8:.2f}亿），"
-                            "签约金额大于实际履约金额，存在履约风险"
-                        ),
-                        "severity": "yellow"
                     })
 
             # ─── 4. 退场原因补充（附表1·未开工或退场原因） ───

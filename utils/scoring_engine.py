@@ -421,8 +421,8 @@ class ScoringEngine:
         w5 = weights.get("模块五_资金效率", {}).get("weight", 0.45)
 
         # ── 0-100 → 1-3 档映射（风险方向：高分→低档）──
-        r3_level = self._score_to_risk_level(module3_score)
-        r5_level = self._score_to_risk_level(module5_score)
+        r3_level = self.score_to_risk_level(module3_score)
+        r5_level = self.score_to_risk_level(module5_score)
 
         # ── 加权平均 ──
         r_raw = r3_level * w3 + r5_level * w5
@@ -449,8 +449,8 @@ class ScoringEngine:
         w5 = weights.get("模块五_资金效率", {}).get("weight", 0.45)
 
         # ── 0-100 → 1-3 档映射（收益方向：高分→高档）──
-        e4_level = self._score_to_return_level(module4_score)
-        e5_level = self._score_to_return_level(module5_score)
+        e4_level = self.score_to_return_level(module4_score)
+        e5_level = self.score_to_return_level(module5_score)
 
         # ── 加权平均 ──
         e_raw = e4_level * w4 + e5_level * w5
@@ -677,25 +677,28 @@ class ScoringEngine:
         return round(max(0.0, min(100.0, score)), 1)
 
     # ═══════════════════════════════════════════════════════════════
-    # 内部方法：0-100 → 1-3 档位映射
+    # 公开方法：0-100 → 1-3 连续档位映射（供 DiscreteAnalyzer v4.0 调用）
     # ═══════════════════════════════════════════════════════════════
 
-    def _score_to_risk_level(self, score: float) -> float:
-        """模块得分 → 风险档位（R轴）.
+    def score_to_risk_level(self, score: float) -> float:
+        """模块得分 → 风险档位连续值（R轴，1.0-3.0）.
 
-        R轴逻辑：得分越高 → 风险越低 → 档位越小
-        ≥80 → 低风险(1档), 65-79 → 中风险(2档), <65 → 高风险(3档)
+        R轴逻辑：得分越高 → 风险越低 → 档位越小。
+        使用 np.interp 线性插值，消灭硬性阶梯断崖。
+
+        64 → 3.0, 66 → 2.87, 72 → 2.47, 80 → 1.0
         """
-        # 使用平滑插值而非硬性阶梯
         xp = np.array([0, 65, 80, 100], dtype=np.float64)
         fp = np.array([3.0, 3.0, 1.0, 1.0], dtype=np.float64)
         return float(np.interp(score, xp, fp))
 
-    def _score_to_return_level(self, score: float) -> float:
-        """模块得分 → 收益档位（E轴）.
+    def score_to_return_level(self, score: float) -> float:
+        """模块得分 → 收益档位连续值（E轴，1.0-3.0）.
 
-        E轴逻辑：得分越高 → 收益越高 → 档位越大
-        ≥80 → 高收益(3档), 65-79 → 中收益(2档), <65 → 低收益(1档)
+        E轴逻辑：得分越高 → 收益越高 → 档位越大。
+        使用 np.interp 线性插值，消灭硬性阶梯断崖。
+
+        64 → 1.0, 66 → 1.13, 72 → 1.53, 80 → 3.0
         """
         xp = np.array([0, 65, 80, 100], dtype=np.float64)
         fp = np.array([1.0, 1.0, 3.0, 3.0], dtype=np.float64)

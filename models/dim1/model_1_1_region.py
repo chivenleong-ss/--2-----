@@ -280,6 +280,47 @@ class Model11Region(BaseModel):
                         "签约额（元）": stats["total_amt"],
                     })
 
+        # === Step 4: 授权城市未破零检测 ===
+        # 检查每个单位的授权城市集合中是否有城市完全无项目落地
+        actual_cities_by_unit = {}
+        for _, row in df.iterrows():
+            unit = str(row.get("申报单位", ""))
+            address = str(row.get("项目地址", ""))
+            city = self._extract_city(address)
+            if unit and city:
+                if unit not in actual_cities_by_unit:
+                    actual_cities_by_unit[unit] = set()
+                actual_cities_by_unit[unit].add(city)
+
+        # Collect all authorized cities per unit across all years
+        for unit_name in unit_stats:
+            # Find auth entry for this unit from any year
+            auth_cities_all = set()
+            for year, lookup in auth_lookups.items():
+                match_key, entry = self._match_unit(unit_name, lookup)
+                if match_key and entry:
+                    auth_cities_all |= entry.get("all_cities", set())
+
+            if auth_cities_all:
+                actual = actual_cities_by_unit.get(unit_name, set())
+                uncovered = auth_cities_all - actual
+                if len(uncovered) > 0:
+                    # Only flag if at least 20% of authorized cities are uncovered
+                    uncover_ratio = len(uncovered) / len(auth_cities_all)
+                    if uncover_ratio >= 0.20:
+                        findings.append({
+                            "模型编号": "1.1",
+                            "申报单位": unit_name,
+                            "问题分类": "授权城市未破零",
+                            "严重等级": "yellow",
+                            "问题描述": (
+                                f"{unit_name}授权{len(auth_cities_all)}个城市，"
+                                f"{len(uncovered)}个无项目落地({uncover_ratio:.0%})，"
+                                f"缺失: {', '.join(sorted(list(uncovered))[:5])}"
+                            ),
+                            "签约额（元）": 0,
+                        })
+
         if len(issues_df) > 0:
             issues_df = issues_df.sort_values("严重等级")
 
@@ -288,6 +329,7 @@ class Model11Region(BaseModel):
             "窜区项目": len(issues_df[issues_df["问题分类"] == "窜区"]) if len(issues_df) > 0 else 0,
             "非常规未达门槛": len(issues_df[issues_df["问题分类"] == "非常规区域未达门槛"]) if len(issues_df) > 0 else 0,
             "深耕区域占比不足": len(issues_df[issues_df["问题分类"] == "深耕区域占比不足"]) if len(issues_df) > 0 else 0,
+            "授权城市未破零": len(issues_df[issues_df["问题分类"] == "授权城市未破零"]) if len(issues_df) > 0 else 0,
             "total_issues": len(issues_df),
         }
 

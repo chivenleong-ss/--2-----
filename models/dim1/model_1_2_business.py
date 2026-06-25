@@ -220,15 +220,17 @@ class Model12Business(BaseModel):
                     urban_mask |= df[col].astype(str).apply(
                         lambda x: any(kw in x for kw in urban_kw) if pd.notna(x) else False
                     )
-            urban_count = urban_mask.sum()
-            total_count = len(df)
-            if total_count > 0 and urban_count == 0:
+            urban_amt = df.loc[urban_mask, "签约额（元）"].apply(safe_float).sum()
+            total_amt = df["签约额（元）"].apply(safe_float).sum()
+            urban_ratio = urban_amt / total_amt if total_amt > 0 else 0
+            if total_amt > 0 and urban_ratio < 0.05:
                 findings.append({
                     "模型编号": "1.2",
-                    "问题分类": "城市更新业务空白",
+                    "问题分类": "城市更新业务不足",
                     "严重等级": "yellow",
                     "问题描述": (
-                        f"【1236框架·增长点】全局{total_count}个项目中未识别到城市更新与运营类项目，"
+                        f"【1236框架·增长点】城市更新与运营类合同额占比仅{urban_ratio:.1%} < 5%，"
+                        f"（{urban_amt/1e8:.1f}亿/{total_amt/1e8:.1f}亿），"
                         "十五五目标占比20%，需加速布局"
                     ),
                 })
@@ -374,7 +376,7 @@ class Model12Business(BaseModel):
             "total_projects": len(df),
             "业务结构目标偏离": _count("业务结构目标偏离"),
             "EPC转型": _count("EPC转型"),
-                "城市更新": _count("城市更新"),
+                "城市更新": _count("城市更新业务不足"),
                 "新兴业务": _count("新兴业务"),
                 "区域目标偏离": _count("区域发展目标偏离"),
                 "专业定位偏离": _count("专业定位偏离"),

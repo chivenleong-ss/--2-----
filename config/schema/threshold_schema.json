@@ -1,0 +1,106 @@
+{
+  "_description": "阈值注解规范 v1.0 —— 所有config/rules.json中阈值的统一注解字段定义",
+  "_适用范围": "config/rules.json 中所有叶子阈值节点",
+
+  "annotation_fields": {
+    "_source": {
+      "type": "string",
+      "required": true,
+      "description": "阈值的制度来源或经验依据，需具体到条款号",
+      "examples": [
+        "手册0520附件4第6条：承接效益率<0%严禁投标",
+        "审计经验：签约半年不落地大概率是虚假项目",
+        "行业惯例：前5大客户超过60%集中度风险过高",
+        "十五五战略规划第二篇第二章§3表3"
+      ]
+    },
+    "_category": {
+      "type": "string",
+      "required": true,
+      "enum": ["institutional", "experience", "strategic", "scoring", "compliance"],
+      "description": "阈值分类：institutional=制度红线不可修改, experience=经验预警可调整, strategic=战略规划按年更新, scoring=评分引擎参数, compliance=合规映射"
+    },
+    "_adjustable": {
+      "type": "boolean",
+      "required": true,
+      "description": "是否允许业务人员自行调整。institutional类通常为false，experience类为true"
+    },
+    "_range": {
+      "type": "string",
+      "required": false,
+      "description": "建议的可调整范围，仅_adjustable=true时有效",
+      "examples": ["90-365天", "0.40-0.80", "3-12个月"]
+    },
+    "_impact": {
+      "type": "string",
+      "required": false,
+      "description": "调整此阈值的影响说明，帮助业务人员理解调整后果",
+      "examples": [
+        "收紧→更多项目被剔除，漏检风险降低但误杀增加",
+        "放松→更少项目被预警，可能漏检问题项目"
+      ]
+    },
+    "_unit_overrides": {
+      "type": "object",
+      "required": false,
+      "description": "按二级单位的阈值覆盖。Key为单位简称（匹配detect_strategic_scope的路由结果），Value为覆盖后的阈值",
+      "example": {"安装公司": 0.70, "一公司": 0.55}
+    },
+    "_note": {
+      "type": "string",
+      "required": false,
+      "description": "额外说明，如特殊计算逻辑、历史沿革、待办事项"
+    },
+    "_related_models": {
+      "type": "array",
+      "required": false,
+      "description": "使用此阈值的模型列表",
+      "example": ["1.4", "3.3"]
+    }
+  },
+
+  "category_rules": {
+    "institutional": {
+      "description": "制度红线类阈值——来自正式制度文件，严格校验，不可随意修改",
+      "source_requirement": "必须引用具体制度条款编号",
+      "adjustable_default": false,
+      "change_process": "需经制度修订流程，修改后同步更新方案文档"
+    },
+    "experience": {
+      "description": "经验预警类阈值——制度未明确，基于审计经验和行业惯例，可动态调整",
+      "source_requirement": "标注来源逻辑（审计经验/行业惯例/管理要求）",
+      "adjustable_default": true,
+      "change_process": "业务负责人审核后可直接修改config，需记录修改原因和日期"
+    },
+    "strategic": {
+      "description": "战略规划基准——来自十五五战略规划等局级战略文件，按年度更新",
+      "source_requirement": "引用规划文件章节编号",
+      "adjustable_default": false,
+      "change_process": "随战略规划年度滚动更新，修改需与规划文件对齐"
+    },
+    "scoring": {
+      "description": "评分引擎参数——控制评分计算的权重、档位、折扣系数等",
+      "source_requirement": "标注设计依据（如Excel评分表对应行）",
+      "adjustable_default": true,
+      "change_process": "需评分体系评审，修改后需验证评分分布变化"
+    },
+    "compliance": {
+      "description": "合规映射——违规条款分类与定级，用于监督问责",
+      "source_requirement": "引用手册0520附件6条款编号",
+      "adjustable_default": false,
+      "change_process": "需合规部门审核"
+    }
+  },
+
+  "value_types": {
+    "percentage": {"format": "0-1之间的小数", "example": 0.75, "display": "75%"},
+    "amount_wan": {"format": "万元整数", "example": 5000, "display": "5000万元"},
+    "amount_yi": {"format": "亿元整数", "example": 5, "display": "5亿元"},
+    "days": {"format": "天数整数", "example": 180, "display": "180天"},
+    "months": {"format": "月数整数", "example": 12, "display": "12个月"},
+    "count": {"format": "整数", "example": 4, "display": "4次"},
+    "ratio": {"format": "0-1小数", "example": 0.10, "display": "10%"},
+    "boolean": {"format": "true/false", "example": true},
+    "string": {"format": "字符串", "example": "严禁投标"}
+  }
+}

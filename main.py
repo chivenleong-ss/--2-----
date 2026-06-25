@@ -12,9 +12,40 @@ import sys
 import os
 import re
 import json
+import hashlib
 import argparse
 from datetime import datetime
 import pandas as pd
+
+# ═══════════════════════════════════════════════════════════════════
+# 缓存版本控制：修改评分/计算逻辑后递增此版本号，自动淘汰旧缓存
+# ═══════════════════════════════════════════════════════════════════
+CACHE_VERSION = "v4.2"  # 2026-06-23: 九宫格 R/E 钳位 + openpyxl StyleProxy 修复
+
+def _pkl_dump(obj, path):
+    """写入带版本戳的 pickle 缓存."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    import pickle
+    with open(path, "wb") as f:
+        pickle.dump({"__cache_version__": CACHE_VERSION, "data": obj}, f)
+
+def _pkl_load(path, label="cache"):
+    """读取 pickle 缓存，版本不匹配时自动丢弃并返回 None."""
+    import pickle
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        wrapper = pickle.load(f)
+    if isinstance(wrapper, dict) and "__cache_version__" in wrapper:
+        if wrapper["__cache_version__"] == CACHE_VERSION:
+            return wrapper["data"]
+        print(f"  [Cache] {label} version mismatch ({wrapper['__cache_version__']} != {CACHE_VERSION}), discarding")
+        os.remove(path)
+        return None
+    # 旧格式无版本戳，直接丢弃
+    print(f"  [Cache] {label} is unversioned legacy format, discarding")
+    os.remove(path)
+    return None
 
 # Enable unbuffered output for real-time logging in web app
 # Line-buffering mode (buffering=1) for both stdout and stderr
@@ -29,7 +60,7 @@ from data_loader.region_loader import load_all_years
 from data_loader.data_adapter import build_unified_projects, enrich_region_data, load_bid_report, merge_qcc_risk
 from models.dim2 import Model21Risk, Model22Profit, Model23Capital, Model24Clause, Model25Construction
 from models.dim1 import Model11Region, Model12Business, Model13StrategicCustomer, Model14DataCheck
-from models.dim3 import Model31WinLoss, Model32NewCustomer
+from models.dim3 import Model31WinLoss, Model32NewCustomer, Model33Zombie
 # Model33Zombie v2.9已合并入Model31WinLoss
 from correlation import run_chain_1, run_chain_2, run_chain_3
 from models.discrete_analysis import DiscreteAnalyzer
@@ -65,6 +96,7 @@ def get_model_instance(model_id: str, config: dict, output_dir: str):
         "2.5": Model25Construction,  # v2.9从2.2拆分
         "3.1": Model31WinLoss,
         "3.2": Model32NewCustomer,
+        "3.3": Model33Zombie,
         # 3.3 v2.9已合并入3.1
     }
     cls = model_map.get(model_id)
@@ -81,6 +113,7 @@ def run_phase(phase: str, config: dict, dmp, appendices, region_auth, output_dir
         "P2": ["1.2", "1.3", "3.1"],
         "P3": ["1.4", "3.2"],  # 3.3 v2.9已合并入3.1
     }
+    phase_models["P3"] = phase_models.get("P3", []) + ["3.3"]
     model_ids = phase_models.get(phase, [])
     results = {}
     for mid in model_ids:
@@ -110,8 +143,12 @@ def main():
     print(f"[MAIN] Process started at {datetime.now().isoformat()}", flush=True)
     print(f"[MAIN] Args: phase={args.phase}, model={args.model}, prefilter_only={args.prefilter_only}", flush=True)
 
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isabs(args.output_dir):
+        args.output_dir = os.path.join(project_root, args.output_dir)
+    args.output_dir = os.path.abspath(args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(project_root)
 
     print("=" * 60)
     print("  全面数字化营销审计系统 — v2.9 (DMP数据驱动)")
@@ -394,24 +431,19 @@ def main():
 
         # ===== Save All Results =====
         print("\n[3.5/5] Saving model outputs...")
-        import pickle
         cache_path = os.path.join(args.output_dir, "model_outputs", "_all_results.pkl")
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        with open(cache_path, "wb") as f:
-            pickle.dump(all_results, f)
+        _pkl_dump(all_results, cache_path)
         print(f"  Cached to {cache_path}")
 
     else:
         # Report-only mode: load cached results
         print("\n[Report-only] Loading cached model outputs...")
-        import pickle
         cache_path = os.path.join(args.output_dir, "model_outputs", "_all_results.pkl")
-        if not os.path.exists(cache_path):
-            print(f"ERROR: No cached results found at {cache_path}")
+        all_results = _pkl_load(cache_path, "_all_results")
+        if all_results is None:
+            print(f"ERROR: No version-compatible cache found at {cache_path}")
             print("Run full pipeline first: python main.py")
             sys.exit(1)
-        with open(cache_path, "rb") as f:
-            all_results = pickle.load(f)
         config = load_config()  # Still need config for report context
         print(f"  Loaded {len(all_results)} model outputs")
 
@@ -425,20 +457,15 @@ def main():
     chain_logger.flush()
     print(f"  Chains complete: {len(chain_results)} correlation chains analyzed")
 
-    import pickle
     if args.report_only:
         print("\n[4.2/5] Loading cached discrete/business analysis...")
         disc_path = os.path.join(args.output_dir, "model_outputs", "_discrete_results.pkl")
         biz_path = os.path.join(args.output_dir, "model_outputs", "_business_results.pkl")
-        if os.path.exists(disc_path):
-            with open(disc_path, "rb") as f:
-                discrete_results = pickle.load(f)
-        else:
+        discrete_results = _pkl_load(disc_path, "_discrete_results")
+        if discrete_results is None:
             discrete_results = {"summary": {"total_projects": 0}, "projects": [], "cities": [], "subsidiaries": []}
-        if os.path.exists(biz_path):
-            with open(biz_path, "rb") as f:
-                business_results = pickle.load(f)
-        else:
+        business_results = _pkl_load(biz_path, "_business_results")
+        if business_results is None:
             business_results = {"summary": {"total_projects": 0}, "overview": {}, "subsidiaries": [], "cities": []}
         print(f"  Discrete cached projects: {discrete_results.get('summary', {}).get('total_projects', 0)}")
         print(f"  Business cached projects: {business_results.get('summary', {}).get('total_projects', 0)}")
@@ -453,8 +480,7 @@ def main():
         if business_summary.get("top_unit"):
             print(f"  Top subsidiary: {business_summary['top_unit']} ({business_summary.get('top_unit_score', 0)} points)")
         biz_path = os.path.join(args.output_dir, "model_outputs", "_business_results.pkl")
-        with open(biz_path, "wb") as f:
-            pickle.dump(business_results, f)
+        _pkl_dump(business_results, biz_path)
 
         # ===== v2.10: Discrete Analysis (九宫格) — 消费六模块结果 =====
         print("\n[4.3/5] Running discrete risk-return analysis (from 6-module indicators)...")
@@ -471,8 +497,7 @@ def main():
         if discrete_summary.get("avg_confidence"):
             print(f"  Avg confidence: {discrete_summary['avg_confidence']:.1f} | Low confidence projects: {discrete_summary.get('low_confidence_count', 0)}")
         disc_path = os.path.join(args.output_dir, "model_outputs", "_discrete_results.pkl")
-        with open(disc_path, "wb") as f:
-            pickle.dump(discrete_results, f)
+        _pkl_dump(discrete_results, disc_path)
 
         # ===== v2.10: 分阶段内存释放 =====
         print("\n[Memory] Releasing large DataFrames after analysis...")
